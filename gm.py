@@ -4,6 +4,10 @@ from pypdf import PdfReader
 from PIL import Image
 import os
 
+# Streamlit Secrets se API key automatic connect hogi
+api_key = st.secrets["GEMINI_API_KEY"]
+client = genai.Client(api_key=api_key)
+
 # Page Configuration
 st.set_page_config(page_title="GM Cyber & Student AI", page_icon="🛡️", layout="centered")
 
