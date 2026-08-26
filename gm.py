@@ -10,6 +10,7 @@ import io
 api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
 
 # OpenRouter Helper Function (Free Model & Limit Fixed)
+# OpenRouter Helper Function (Working Model & Token Limit Fixed)
 def call_ai(prompt, image=None):
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -28,7 +29,7 @@ def call_ai(prompt, image=None):
         })
         
     payload = {
-        "model": "google/gemini-2.5-flash:free",
+        "model": "google/gemini-2.5-flash",
         "messages": [{"role": "user", "content": content_payload}],
         "max_tokens": 2000
     }
