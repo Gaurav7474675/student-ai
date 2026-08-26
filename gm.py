@@ -1,14 +1,42 @@
 import streamlit as st
-from google import genai
+import requests
 from pypdf import PdfReader
 from PIL import Image
 import os
+import base64
+import io
 
 # Secrets se API Key connect karna
 api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
 
-# Client initialize karna (Nayi library syntax)
-client = genai.Client(api_key=api_key) if api_key else None
+# OpenRouter Helper Function (Har Key Accept Karta Hai)
+def call_ai(prompt, image=None):
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    
+    content_payload = [{"type": "text", "text": prompt}]
+    
+    if image:
+        buffered = io.BytesIO()
+        image.save(buffered, format="PNG")
+        img_str = base64.b64encode(buffered.getvalue()).decode()
+        content_payload.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:image/png;base64,{img_str}"}
+        })
+        
+    payload = {
+        "model": "google/gemini-2.5-flash",
+        "messages": [{"role": "user", "content": content_payload}]
+    }
+    
+    response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload)
+    if response.status_code == 200:
+        return response.json()['choices'][0]['message']['content']
+    else:
+        raise Exception(f"API Response Error: {response.text}")
 
 # Page Configuration
 st.set_page_config(page_title="GM Cyber & Student AI", page_icon="🛡️", layout="centered")
@@ -77,7 +105,7 @@ with tab1:
     if st.button("🚀 Process PDF", key="btn_pdf"):
         if not uploaded_file:
             st.warning("Pehle koi PDF upload karein!")
-        elif not client:
+        elif not api_key:
             st.error("API Key nahi mil rahi! Kripya Streamlit Secrets me GEMINI_API_KEY save karein.")
         else:
             try:
@@ -85,12 +113,10 @@ with tab1:
                     reader = PdfReader(uploaded_file)
                     extracted_text = ""
                     
-                    # 1. Page Limit Logic
                     max_pages = 100 if is_pro else 3
                     for page in reader.pages[:max_pages]:
                         extracted_text += page.extract_text() or ""
 
-                    # 2. Text Cut-off Logic
                     text_limit = 500000 if is_pro else 8000
                     final_text = extracted_text[:text_limit]
 
@@ -106,13 +132,10 @@ with tab1:
                         else:
                             prompt = f"Perform a cybersecurity assessment, threat analysis, and security summary for this content:\n\n{final_text}"
 
-                        response = client.models.generate_content(
-                            model="gemini-1.5-flash",
-                            contents=prompt
-                        )
+                        res_text = call_ai(prompt)
 
                         st.success("✨ Processing Complete!")
-                        st.markdown(response.text)
+                        st.markdown(res_text)
                         
                         if not is_pro:
                             st.info("💡 Free Plan limits scanning to first 3 pages. Select 'Pro User' in sidebar to scan full books!")
@@ -129,7 +152,7 @@ with tab2:
     if st.button("🔍 Analyze Image", key="btn_img"):
         if not uploaded_img:
             st.warning("Pehle koi Image upload karein!")
-        elif not client:
+        elif not api_key:
             st.error("API Key nahi mil rahi! Kripya Streamlit Secrets me GEMINI_API_KEY save karein.")
         else:
             try:
@@ -139,13 +162,10 @@ with tab2:
                     
                     user_query = img_prompt if img_prompt.strip() else "Explain this image in detail and solve any questions present in it."
                     
-                    response = client.models.generate_content(
-                        model="gemini-1.5-flash",
-                        contents=[image, user_query]
-                    )
+                    res_text = call_ai(user_query, image=image)
 
                     st.success("✨ Analysis Complete!")
-                    st.markdown(response.text)
+                    st.markdown(res_text)
             except Exception as e:
                 st.error(f"Error: {e}")
 
@@ -157,17 +177,14 @@ with tab3:
     if st.button("⚡ Get Answer", key="btn_text"):
         if not user_text_question.strip():
             st.warning("Pehle apna sawaal/text likhein!")
-        elif not client:
+        elif not api_key:
             st.error("API Key nahi mil rahi! Kripya Streamlit Secrets me GEMINI_API_KEY save karein.")
         else:
             try:
                 with st.spinner("GM AI is thinking..."):
-                    response = client.models.generate_content(
-                        model="gemini-1.5-flash",
-                        contents=user_text_question
-                    )
+                    res_text = call_ai(user_text_question)
 
                     st.success("✨ Answer Generated!")
-                    st.markdown(response.text)
+                    st.markdown(res_text)
             except Exception as e:
                 st.error(f"Error: {e}")
