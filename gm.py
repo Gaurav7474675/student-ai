@@ -9,7 +9,7 @@ import io
 # Secrets se API Key connect karna
 api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
 
-# OpenRouter Helper Function (Har Key Accept Karta Hai)
+# OpenRouter Helper Function (Free Model & Limit Fixed)
 def call_ai(prompt, image=None):
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -28,8 +28,9 @@ def call_ai(prompt, image=None):
         })
         
     payload = {
-        "model": "google/gemini-2.5-flash",
-        "messages": [{"role": "user", "content": content_payload}]
+        "model": "google/gemini-2.5-flash:free",
+        "messages": [{"role": "user", "content": content_payload}],
+        "max_tokens": 2000
     }
     
     response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload)
@@ -37,7 +38,6 @@ def call_ai(prompt, image=None):
         return response.json()['choices'][0]['message']['content']
     else:
         raise Exception(f"API Response Error: {response.text}")
-
 # Page Configuration
 st.set_page_config(page_title="GM Cyber & Student AI", page_icon="🛡️", layout="centered")
 
