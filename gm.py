@@ -4,9 +4,11 @@ from pypdf import PdfReader
 from PIL import Image
 import os
 
-# API Key Secrets se uthane ke liye:
-api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
-client = genai.Client(api_key=api_key)
+# System environment variable me key set karke client call karein
+api_key = st.secrets["GEMINI_API_KEY"]
+os.environ["GEMINI_API_KEY"] = api_key
+
+client = genai.Client()
 # Page Configuration
 st.set_page_config(page_title="GM Cyber & Student AI", page_icon="🛡️", layout="centered")
 
