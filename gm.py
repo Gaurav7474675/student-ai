@@ -30,7 +30,7 @@ with col1:
 
 with col2:
     st.title("🛡️ STUDENT AI")
-    st.caption("Created by MG Gangwar | Instant Cyber Assistance, Exam Notes & MCQs")
+    st.caption("Created by *MG Gangwar* | Instant Cyber Assistance, Exam Notes & MCQs")
 
 st.markdown("---")
 
@@ -47,7 +47,7 @@ if user_mode == "💎 Pro User (Full Book)":
     try:
         st.sidebar.image("qr.png", caption="Scan to pay ₹99 via UPI", width=180)
     except:
-        st.sidebar.info("📱 Pay ₹99 to UPI ID: yourname@upi")
+        st.sidebar.info("📱 *Pay ₹99 to UPI ID:* yourname@upi")
     
     st.sidebar.write("1. QR Code scan karke ₹99 pay karein.")
     st.sidebar.write("2. Payment ke baad Access Passcode daalein:")
