@@ -1,14 +1,17 @@
 import streamlit as st
-from google import genai
+import google.generativeai as genai
 from pypdf import PdfReader
 from PIL import Image
 import os
 
-# System environment variable me key set karke client call karein
-api_key = st.secrets["GEMINI_API_KEY"]
-os.environ["GEMINI_API_KEY"] = api_key
+# Secrets se API Key connect karna
+api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
+if api_key:
+    genai.configure(api_key=api_key)
 
-client = genai.Client()
+# Model initialize karna
+model = genai.GenerativeModel('gemini-1.5-flash')
+
 # Page Configuration
 st.set_page_config(page_title="GM Cyber & Student AI", page_icon="🛡️", layout="centered")
 
@@ -22,16 +25,16 @@ st.markdown("""
 # ----------------- HEADER & PROFILE SECTION -----------------
 col1, col2 = st.columns([1, 4])
 with col1:
-    st.image("profile.jpeg", width=85)
+    try:
+        st.image("profile.jpeg", width=85)
+    except:
+        st.write("🛡️")
 
 with col2:
     st.title("🛡️ STUDENT AI")
-    st.caption("Created by *MG Gangwar* | Instant Cyber Assistance, Exam Notes & MCQs")
+    st.caption("Created by MG Gangwar | Instant Cyber Assistance, Exam Notes & MCQs")
 
 st.markdown("---")
-
-# ----------------- MASTER BACKEND API KEY -----------------
-API_KEY = "AQ.Ab8RN6ILLC9fBZUt3RdtQ9KRPopHuNlqzyHKBdfm0Id4qT2qsA"
 
 # ----------------- SIDEBAR PAYMENT & PLAN SECTION -----------------
 st.sidebar.header("👑 Member Access")
@@ -46,7 +49,7 @@ if user_mode == "💎 Pro User (Full Book)":
     try:
         st.sidebar.image("qr.png", caption="Scan to pay ₹99 via UPI", width=180)
     except:
-        st.sidebar.info("📱 *Pay ₹99 to UPI ID:* yourname@upi")
+        st.sidebar.info("📱 Pay ₹99 to UPI ID: yourname@upi")
     
     st.sidebar.write("1. QR Code scan karke ₹99 pay karein.")
     st.sidebar.write("2. Payment ke baad Access Passcode daalein:")
@@ -76,8 +79,8 @@ with tab1:
     if st.button("🚀 Process PDF", key="btn_pdf"):
         if not uploaded_file:
             st.warning("Pehle koi PDF upload karein!")
-        elif API_KEY == "YOUR_GEMINI_API_KEY_HERE":
-            st.error("Admin: Please replace 'YOUR_GEMINI_API_KEY_HERE' in code with your actual Gemini API Key!")
+        elif not api_key:
+            st.error("API Key nahi mil rahi! Kripya Streamlit Secrets me GEMINI_API_KEY save karein.")
         else:
             try:
                 with st.spinner("GM AI is reading your document..."):
@@ -96,8 +99,6 @@ with tab1:
                     if not final_text.strip():
                         st.error("PDF se text read nahi ho paya. Clean text PDF use karein.")
                     else:
-                        client = genai.Client(api_key=API_KEY)
-
                         if "Quick Revision Notes" in feature:
                             prompt = f"Provide structured, high-yield quick revision notes with bold key terms from this content:\n\n{final_text}"
                         elif "Important Exam Questions" in feature:
@@ -107,10 +108,7 @@ with tab1:
                         else:
                             prompt = f"Perform a cybersecurity assessment, threat analysis, and security summary for this content:\n\n{final_text}"
 
-                        response = client.models.generate_content(
-                            model="gemini-3.6-flash",
-                            contents=prompt
-                        )
+                        response = model.generate_content(prompt)
 
                         st.success("✨ Processing Complete!")
                         st.markdown(response.text)
@@ -130,8 +128,8 @@ with tab2:
     if st.button("🔍 Analyze Image", key="btn_img"):
         if not uploaded_img:
             st.warning("Pehle koi Image upload karein!")
-        elif API_KEY == "YOUR_GEMINI_API_KEY_HERE":
-            st.error("Admin: Please enter your Gemini API Key in the code!")
+        elif not api_key:
+            st.error("API Key nahi mil rahi! Kripya Streamlit Secrets me GEMINI_API_KEY save karein.")
         else:
             try:
                 with st.spinner("GM AI is analyzing image..."):
@@ -140,11 +138,7 @@ with tab2:
                     
                     user_query = img_prompt if img_prompt.strip() else "Explain this image in detail and solve any questions present in it."
                     
-                    client = genai.Client(api_key=API_KEY)
-                    response = client.models.generate_content(
-                        model="gemini-3.6-flash",
-                        contents=[image, user_query]
-                    )
+                    response = model.generate_content([user_query, image])
 
                     st.success("✨ Analysis Complete!")
                     st.markdown(response.text)
@@ -159,16 +153,12 @@ with tab3:
     if st.button("⚡ Get Answer", key="btn_text"):
         if not user_text_question.strip():
             st.warning("Pehle apna sawaal/text likhein!")
-        elif API_KEY == "YOUR_GEMINI_API_KEY_HERE":
-            st.error("Admin: Please enter your Gemini API Key in the code!")
+        elif not api_key:
+            st.error("API Key nahi mil rahi! Kripya Streamlit Secrets me GEMINI_API_KEY save karein.")
         else:
             try:
                 with st.spinner("GM AI is thinking..."):
-                    client = genai.Client(api_key=API_KEY)
-                    response = client.models.generate_content(
-                        model="gemini-3.6-flash",
-                        contents=user_text_question
-                    )
+                    response = model.generate_content(user_text_question)
 
                     st.success("✨ Answer Generated!")
                     st.markdown(response.text)
