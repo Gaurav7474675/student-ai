@@ -1,4 +1,18 @@
 import streamlit as st
+
+# Streamlit Toolbar, GitHub button aur footer ko completely hide karne ka code
+hide_streamlit_style = """
+    <style>
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    div[data-testid="stToolbar"] {display: none !important;}
+    div[data-testid="stDecoration"] {display: none !important;}
+    div[data-testid="stStatusWidget"] {visibility: hidden !important;}
+    </style>
+"""
+st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+import streamlit as st
 import requests
 from pypdf import PdfReader
 from PIL import Image
