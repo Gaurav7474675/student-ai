@@ -1,6 +1,14 @@
 import streamlit as st
+import requests
+from pypdf import PdfReader
+from PIL import Image
+import os
+import base64
+import io
 
-# Streamlit Toolbar, GitHub button aur footer ko completely hide karne ka code
+# =========================================================
+# STREAMLIT TOOLBAR, GITHUB BUTTON & FOOTER HIDE
+# =========================================================
 hide_streamlit_style = """
     <style>
     #MainMenu {visibility: hidden;}
@@ -12,13 +20,6 @@ hide_streamlit_style = """
     </style>
 """
 st.markdown(hide_streamlit_style, unsafe_allow_html=True)
-import streamlit as st
-import requests
-from pypdf import PdfReader
-from PIL import Image
-import os
-import base64
-import io
 
 # =========================================================
 # PAGE CONFIG
@@ -44,66 +45,52 @@ PRO_PASSCODE = (
     or "GMCYBER2026"
 )
 
+RAZORPAY_PAY_LINK = "https://razorpay.me/@gaurav1324"
+
 # =========================================================
 # SESSION STATE
 # =========================================================
+if "is_logged_in" not in st.session_state:
+    st.session_state.is_logged_in = False
+
+if "logged_username" not in st.session_state:
+    st.session_state.logged_username = ""
+
 if "is_pro" not in st.session_state:
     st.session_state.is_pro = False
 
 if "show_pro_popup" not in st.session_state:
     st.session_state.show_pro_popup = False
 
-if "image_popup_shown" not in st.session_state:
-    st.session_state.image_popup_shown = False
-
-if "pdf_popup_shown" not in st.session_state:
-    st.session_state.pdf_popup_shown = False
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
 
 # =========================================================
-# PROFESSIONAL CSS (Gemini App Layout & Zero Animation)
+# PROFESSIONAL CSS
 # =========================================================
 st.markdown(
     """
     <style>
-    /* Global Clean App Background */
     .stApp {
         background-color: #0E1117;
         color: #F4F7FB;
     }
-    
     .main {
         background: transparent;
     }
-
-    /* Stop Animation & Unwanted Margin Shifting */
-    * {
+    *, *::before, *::after {
         transition: none !important;
         animation: none !important;
     }
-
     .block-container {
         max-width: 950px;
         padding-top: 1rem;
-        padding-bottom: 7rem;
+        padding-bottom: 140px !important;
     }
-
-    /* Top Bar Header */
-    .header-box {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 10px 0px;
-        border-bottom: 1px solid #202938;
-        margin-bottom: 20px;
-    }
-
-    /* Sidebar Styling */
     section[data-testid="stSidebar"] {
         background-color: #121824;
         border-right: 1px solid #202938;
     }
-
-    /* Buttons Style */
     .stButton > button {
         border-radius: 10px;
         border: 1px solid #344054;
@@ -111,41 +98,29 @@ st.markdown(
         color: #F8FAFC;
         font-weight: 600;
     }
-
     .stButton > button:hover {
         border-color: #22C55E;
         background: #172033;
     }
-
-    /* Green Process PDF button */
     div[data-testid="stButton"] button[kind="primary"] {
         background: linear-gradient(135deg, #16A34A, #15803D) !important;
         border: 1px solid #22C55E !important;
         color: white !important;
         font-weight: 800 !important;
     }
-
-    /* Gemini-Style Fixed Bottom Dock */
-    .gemini-bottom-dock {
+    .gemini-dock-wrapper {
         position: fixed;
-        bottom: 15px;
-        left: 55%;
-        transform: translateX(-50%);
-        width: 60%;
-        max-width: 750px;
-        background-color: #1E2638;
-        border: 1px solid #344054;
-        border-radius: 20px;
-        padding: 10px 20px;
-        box-shadow: 0px 8px 30px rgba(0,0,0,0.6);
-        z-index: 999;
+        bottom: 0px;
+        left: 0px;
+        right: 0px;
+        background-color: #0E1117;
+        padding: 15px 20px 25px 20px;
+        border-top: 1px solid #202938;
+        z-index: 99999;
     }
-
-    @media (max-width: 768px) {
-        .gemini-bottom-dock {
-            width: 90%;
-            left: 50%;
-        }
+    .dock-container {
+        max-width: 850px;
+        margin: 0 auto;
     }
     </style>
     """,
@@ -197,16 +172,12 @@ def call_ai(prompt, image=None):
 # =========================================================
 # PRO POPUP DIALOG
 # =========================================================
-RAZORPAY_PAY_LINK = "https://razorpay.me/@gaurav1324"
-
 @st.dialog("💎 Upgrade to Student AI Pro")
 def premium_popup():
     st.markdown("### 👑 STUDENT AI PRO")
     st.write("**₹49 / month** - Unlock full PDF analysis, unlimited pages & Image Solver.")
     
     st.markdown("---")
-    
-    # Direct Razorpay Payment Button
     st.link_button("💳 Pay ₹49 via Razorpay", RAZORPAY_PAY_LINK, type="primary", use_container_width=True)
 
     st.markdown("---")
@@ -226,139 +197,195 @@ def premium_popup():
         if st.button("Close", use_container_width=True):
             st.session_state.show_pro_popup = False
             st.rerun()
-# =========================================================
-# HEADER & TOP PRO BUTTON
-# =========================================================
-head_col1, head_col2 = st.columns([4, 1])
 
-with head_col1:
+if st.session_state.show_pro_popup:
+    premium_popup()
+
+# =========================================================
+# PAGE 1: USERNAME & PASSWORD LOGIN SCREEN
+# =========================================================
+if not st.session_state.is_logged_in:
+    st.markdown("<br>", unsafe_allow_html=True)
     st.title("🛡️ STUDENT AI")
     st.caption("Created by **MG Gangwar** | Instant Cyber Assistance, Exam Notes & MCQs")
+    st.divider()
 
-with head_col2:
-    if not st.session_state.is_pro:
-        if st.button("⭐ PRO", type="primary"):
-            st.session_state.show_pro_popup = True
-            st.rerun()
-    else:
-        st.success("👑 Active")
-
-st.divider()
-
-# =========================================================
-# SIDEBAR
-# =========================================================
-with st.sidebar:
-    st.markdown("### 👑 Member Status")
+    login_col1, login_col2, login_col3 = st.columns([1, 2, 1])
     
-    if not st.session_state.is_pro:
-        st.info("🆓 Free Tier\n- PDF: First 3 pages\n- Image Solver: Pro locked")
-        if st.button("💎 Upgrade @ ₹99", use_container_width=True):
-            st.session_state.show_pro_popup = True
-            st.rerun()
-    else:
-        st.success("👑 PRO UNLOCKED\nFull Access Enabled")
+    with login_col2:
+        st.subheader("🔐 Student Login / Register")
+        st.write("App access karne ke liye apna Username aur Password banayein:")
+        
+        username_input = st.text_input("👤 Username", placeholder="e.g. gaurav123")
+        password_input = st.text_input("🔑 Password", type="password", placeholder="Enter password")
+        
+        if st.button("🚀 Login / Sign Up", type="primary", use_container_width=True):
+            if username_input.strip() != "" and password_input.strip() != "":
+                st.session_state.is_logged_in = True
+                st.session_state.logged_username = username_input.strip()
+                st.rerun()
+            else:
+                st.error("⚠️ Username aur Password dono fill karein!")
+
+# =========================================================
+# PAGE 2: MAIN STUDENT AI DASHBOARD
+# =========================================================
+else:
+    head_col1, head_col2 = st.columns([4, 1])
+
+    with head_col1:
+        st.title("🛡️ STUDENT AI")
+        st.caption(f"User: **{st.session_state.logged_username}** | Created by **MG Gangwar**")
+
+    with head_col2:
+        if not st.session_state.is_pro:
+            if st.button("⭐ PRO", type="primary"):
+                st.session_state.show_pro_popup = True
+                st.rerun()
+        else:
+            st.success("👑 Active")
 
     st.divider()
-    st.markdown("""
-    **✨ Features Included:**
-    - 📂 PDF Analysis
-    - 📷 Photo / Image Solver
-    - 💬 Direct AI Ask
-    - 🧪 MCQ & Notes Generator
-    """)
 
-# =========================================================
-# MAIN NAVIGATION TABS
-# =========================================================
-tab1, tab2, tab3 = st.tabs([
-    "📂 PDF Analysis",
-    "📷 Image Solver",
-    "💬 Direct Ask Question"
-])
-
-# ----------------- TAB 1: PDF ANALYSIS -----------------
-with tab1:
-    st.subheader("📂 PDF Notes Generator")
-    uploaded_file = st.file_uploader("PDF File Upload Karein:", type=["pdf"], key="pdf_uploader")
-
-    pdf_page_count = 0
-    if uploaded_file:
-        try:
-            pdf_bytes = uploaded_file.getvalue()
-            pdf_reader_for_count = PdfReader(io.BytesIO(pdf_bytes))
-            pdf_page_count = len(pdf_reader_for_count.pages)
-
-            if pdf_page_count > 3 and not st.session_state.is_pro:
-                st.warning(f"🔒 PDF me **{pdf_page_count} pages** hain. Free plan allows 3 pages.")
-                if not st.session_state.pdf_popup_shown:
-                    st.session_state.pdf_popup_shown = True
-                    st.session_state.show_pro_popup = True
-                    st.rerun()
-        except Exception as e:
-            st.error(f"PDF Reading Error: {e}")
-
-    feature = st.radio(
-        "Generate Output:",
-        ["⚡ Quick Revision Notes", "🎯 Exam Questions", "🧪 Practice MCQs", "🛡️ Code Analysis"],
-        horizontal=True
-    )
-
-    if st.button("🚀 Process PDF", type="primary", use_container_width=True):
-        if not uploaded_file:
-            st.warning("⚠️ Pehle PDF upload karein!")
-        elif pdf_page_count > 3 and not st.session_state.is_pro:
-            st.session_state.show_pro_popup = True
+    # SIDEBAR
+    with st.sidebar:
+        st.markdown("### 👤 User Account")
+        st.info(f"👤 User: **{st.session_state.logged_username}**")
+        
+        if st.button("🔒 Logout", use_container_width=True):
+            st.session_state.is_logged_in = False
+            st.session_state.logged_username = ""
             st.rerun()
+
+        st.divider()
+        st.markdown("### 👑 Member Status")
+        if not st.session_state.is_pro:
+            st.info("🆓 Free Tier\n- PDF: First 3 pages\n- Image Solver: Pro locked")
+            if st.button("💎 Upgrade @ ₹49", use_container_width=True):
+                st.session_state.show_pro_popup = True
+                st.rerun()
         else:
+            st.success("👑 PRO UNLOCKED\nFull Access Enabled")
+
+        st.divider()
+        st.markdown("""
+        **✨ Features Included:**
+        - 📂 PDF Analysis
+        - 📷 Photo / Image Solver
+        - 💬 Direct AI Ask
+        - 🧪 MCQ & Notes Generator
+        """)
+
+    # MAIN NAVIGATION TABS
+    tab1, tab2, tab3 = st.tabs([
+        "📂 PDF Analysis",
+        "📷 Image Solver",
+        "💬 Direct Ask Question"
+    ])
+
+    # ----------------- TAB 1: PDF ANALYSIS -----------------
+    with tab1:
+        st.subheader("📂 PDF Notes Generator")
+        uploaded_file = st.file_uploader("PDF File Upload Karein:", type=["pdf"], key="pdf_uploader")
+
+        pdf_page_count = 0
+        if uploaded_file:
             try:
-                with st.spinner("🤖 Reading PDF..."):
-                    reader = PdfReader(io.BytesIO(uploaded_file.getvalue()))
-                    extracted_text = ""
-                    max_pages = len(reader.pages) if st.session_state.is_pro else min(3, len(reader.pages))
+                pdf_bytes = uploaded_file.getvalue()
+                pdf_reader_for_count = PdfReader(io.BytesIO(pdf_bytes))
+                pdf_page_count = len(pdf_reader_for_count.pages)
 
-                    for page in reader.pages[:max_pages]:
-                        extracted_text += page.extract_text() or ""
-
-                    text_limit = 500000 if st.session_state.is_pro else 8000
-                    final_text = extracted_text[:text_limit]
-
-                    prompt = f"Create structured {feature} from the following text:\n\n{final_text}"
-                    response = call_ai(prompt)
-                    st.markdown("### 📋 AI Result")
-                    st.write(response)
+                if pdf_page_count > 3 and not st.session_state.is_pro:
+                    st.warning(f"🔒 PDF me **{pdf_page_count} pages** hain. Free plan me sirf pehle 3 pages process honge.")
             except Exception as e:
-                st.error(f"Error: {e}")
+                st.error(f"PDF Reading Error: {e}")
 
-# ----------------- TAB 2: IMAGE SOLVER -----------------
-with tab2:
-    st.subheader("📷 Photo / Screenshot Solver")
-    if not st.session_state.is_pro:
-        st.info("🔒 Image Solver is a Pro Feature.")
-        if st.button("Unlock Image Solver @ ₹99"):
-            st.session_state.show_pro_popup = True
-            st.rerun()
-    else:
-        uploaded_img = st.file_uploader("Upload Question / Diagram Image:", type=["jpg", "png", "jpeg"])
-        if uploaded_img:
-            image = Image.open(uploaded_img)
-            st.image(image, caption="Uploaded Image", width=300)
-            if st.button("⚡ Solve Image", type="primary"):
-                with st.spinner("Analyzing image..."):
-                    res = call_ai("Solve and explain this image content step by step:", image=image)
-                    st.markdown("### 💡 Solution")
-                    st.write(res)
+        feature = st.radio(
+            "Generate Output:",
+            ["⚡ Quick Revision Notes", "🎯 Exam Questions", "🧪 Practice MCQs", "🛡️ Code Analysis"],
+            horizontal=True
+        )
 
-# ----------------- TAB 3: DIRECT ASK (Gemini-Style Dock) -----------------
-with tab3:
-    st.subheader("💬 Direct Ask Question")
-    st.write("Type your question below or use the Gemini-style dock.")
+        if st.button("🚀 Process PDF", type="primary", use_container_width=True):
+            if not uploaded_file:
+                st.warning("⚠️ Pehle PDF upload karein!")
+            elif pdf_page_count > 3 and not st.session_state.is_pro:
+                st.session_state.show_pro_popup = True
+                st.rerun()
+            else:
+                try:
+                    with st.spinner("🤖 Reading PDF..."):
+                        reader = PdfReader(io.BytesIO(uploaded_file.getvalue()))
+                        extracted_text = ""
+                        max_pages = len(reader.pages) if st.session_state.is_pro else min(3, len(reader.pages))
 
-    direct_query = st.text_input("Apna Doubt/Topic Yahan Type Karein:", placeholder="e.g. What is SQL Injection?")
-    if st.button("⚡ Get Answer", key="direct_btn"):
-        if direct_query:
-            with st.spinner("Generating..."):
-                ans = call_ai(f"Explain in detail with code examples if needed: {direct_query}")
-                st.write(ans)
+                        for page in reader.pages[:max_pages]:
+                            extracted_text += page.extract_text() or ""
+
+                        text_limit = 500000 if st.session_state.is_pro else 8000
+                        final_text = extracted_text[:text_limit]
+
+                        prompt = f"Create structured {feature} from the following text:\n\n{final_text}"
+                        response = call_ai(prompt)
+                        st.markdown("### 📋 AI Result")
+                        st.write(response)
+                except Exception as e:
+                    st.error(f"Error: {e}")
+
+    # ----------------- TAB 2: IMAGE SOLVER -----------------
+    with tab2:
+        st.subheader("📷 Photo / Screenshot Solver")
+        if not st.session_state.is_pro:
+            st.info("🔒 Image Solver Pro Feature hai.")
+            if st.button("Unlock Image Solver @ ₹49", type="primary"):
+                st.session_state.show_pro_popup = True
+                st.rerun()
         else:
-            st.warning("Please type a question!")
+            uploaded_img = st.file_uploader("Upload Question / Diagram Image:", type=["jpg", "png", "jpeg"])
+            if uploaded_img:
+                image = Image.open(uploaded_img)
+                st.image(image, caption="Uploaded Image", width=300)
+                if st.button("⚡ Solve Image", type="primary"):
+                    with st.spinner("Analyzing image..."):
+                        res = call_ai("Solve and explain this image content step by step:", image=image)
+                        st.markdown("### 💡 Solution")
+                        st.write(res)
+
+    # ----------------- TAB 3: DIRECT ASK -----------------
+    with tab3:
+        st.subheader("💬 Direct Ask Question")
+        st.caption("Puchhe gaye questions ke answers uper scrollable area me aayenge.")
+
+        if st.session_state.chat_history:
+            for q, a in st.session_state.chat_history:
+                st.markdown(f"**❓ Question:** {q}")
+                st.markdown(f"**🤖 Answer:**\n{a}")
+                st.divider()
+
+        st.markdown('<div class="gemini-dock-wrapper"><div class="dock-container">', unsafe_allow_html=True)
+        
+        with st.container():
+            ask_col1, ask_col2 = st.columns([5, 1])
+            with ask_col1:
+                direct_query = st.text_input(
+                    "Apna Doubt / Question type karein...",
+                    placeholder="e.g. What is SQL Injection?",
+                    key="direct_query_input",
+                    label_visibility="collapsed"
+                )
+            with ask_col2:
+                ask_btn = st.button("⚡ Ask", key="direct_btn_dock", type="primary", use_container_width=True)
+
+        st.markdown('</div></div>', unsafe_allow_html=True)
+
+        if ask_btn:
+            if direct_query:
+                with st.spinner("Generating..."):
+                    try:
+                        ans = call_ai(f"Explain in detail with code examples if needed: {direct_query}")
+                        st.session_state.chat_history.append((direct_query, ans))
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+            else:
+                st.warning("Please type a question!")
