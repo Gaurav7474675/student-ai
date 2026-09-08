@@ -197,16 +197,17 @@ def call_ai(prompt, image=None):
 # =========================================================
 # PRO POPUP DIALOG
 # =========================================================
+RAZORPAY_PAY_LINK = "https://razorpay.me/@gaurav1324"
+
 @st.dialog("💎 Upgrade to Student AI Pro")
 def premium_popup():
     st.markdown("### 👑 STUDENT AI PRO")
-    st.write("**₹99 / month** - Unlock full PDF analysis, unlimited pages & Image Solver.")
+    st.write("**₹49 / month** - Unlock full PDF analysis, unlimited pages & Image Solver.")
     
     st.markdown("---")
-    try:
-        st.image("qr.png", caption="Scan & Pay ₹99 via UPI", width=200)
-    except Exception:
-        st.info("📱 Pay ₹99 to UPI Link: https://imjo.in/HJVTwE")
+    
+    # Direct Razorpay Payment Button
+    st.link_button("💳 Pay ₹49 via Razorpay", RAZORPAY_PAY_LINK, type="primary", use_container_width=True)
 
     st.markdown("---")
     passcode = st.text_input("🔐 Enter Pro Access Passcode", type="password")
@@ -225,10 +226,6 @@ def premium_popup():
         if st.button("Close", use_container_width=True):
             st.session_state.show_pro_popup = False
             st.rerun()
-
-if st.session_state.show_pro_popup:
-    premium_popup()
-
 # =========================================================
 # HEADER & TOP PRO BUTTON
 # =========================================================
