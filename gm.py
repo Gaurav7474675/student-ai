@@ -6,7 +6,8 @@ import os
 import base64
 import io
 import sqlite3
-import re
+import hashlib
+import secrets
 from datetime import datetime, timedelta
 
 # =========================================================
@@ -28,7 +29,7 @@ st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 # PAGE CONFIG & ADVANCED CSS
 # =========================================================
 st.set_page_config(
-    page_title="Student AI",
+    page_title="Student AI - Pro Platform",
     page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -46,8 +47,8 @@ st.markdown(
         animation: none !important;
     }
     .block-container {
-        max-width: 950px;
-        padding-top: 1rem;
+        max-width: 1000px;
+        padding-top: 1.5rem;
         padding-bottom: 140px !important;
     }
     section[data-testid="stSidebar"] {
@@ -87,15 +88,17 @@ st.markdown(
     }
     .profile-card {
         background: #161F30;
-        padding: 20px;
+        padding: 24px;
         border-radius: 12px;
         border: 1px solid #202938;
         margin-bottom: 20px;
     }
-    .header-title-box {
-        display: flex;
-        align-items: center;
-        gap: 10px;
+    .metric-card {
+        background: #111827;
+        padding: 15px;
+        border-radius: 8px;
+        border: 1px solid #1F2937;
+        text-align: center;
     }
     </style>
     """,
@@ -108,12 +111,18 @@ st.markdown(
 api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
 PRO_PASSCODE = st.secrets.get("PRO_PASSCODE") or os.environ.get("PRO_PASSCODE") or "GMCYBER2026"
 
-# FIXED ₹99 PAYMENT LINK WITH PRE-FILLED AMOUNT
-RAZORPAY_PAY_LINK = "https://razorpay.me/@gaurav1324?amount=9900"
+# CLEAN DIRECT RAZORPAY UPI PAY LINK
+RAZORPAY_PAY_LINK = "https://razorpay.me/@gaurav1324"
 
 # =========================================================
-# SQLITE DATABASE MANAGEMENT
+# UTILITIES & DATABASE MANAGEMENT
 # =========================================================
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def generate_passcode():
+    return f"PRO-{secrets.token_hex(4).upper()}"
+
 def init_db():
     conn = sqlite3.connect("users_database.db")
     c = conn.cursor()
@@ -124,7 +133,8 @@ def init_db():
             full_name TEXT,
             phone TEXT,
             is_pro INTEGER DEFAULT 0,
-            pro_expiry TEXT
+            pro_expiry TEXT,
+            passcode TEXT
         )
     ''')
     c.execute('''
@@ -143,42 +153,45 @@ init_db()
 def register_user(username, password, full_name, phone):
     conn = sqlite3.connect("users_database.db")
     c = conn.cursor()
+    hashed_p = hash_password(password)
     try:
         c.execute("INSERT INTO users (username, password, full_name, phone, is_pro) VALUES (?, ?, ?, ?, 0)",
-                  (username, password, full_name, phone))
+                  (username, hashed_p, full_name, phone))
         conn.commit()
         conn.close()
-        return True, "User Account Successfully Created!"
+        return True, "Account Successfully Created! Ab Login karein."
     except sqlite3.IntegrityError:
         conn.close()
-        return False, "Username pehle se exist karta hai! Dusra username chunen."
+        return False, "Username pehle se registered hai! Kripya dusra username chunein."
 
 def validate_login(username, password):
     conn = sqlite3.connect("users_database.db")
     c = conn.cursor()
-    c.execute("SELECT username, full_name, phone, is_pro, pro_expiry FROM users WHERE username=? AND password=?", (username, password))
+    hashed_p = hash_password(password)
+    c.execute("SELECT username, full_name, phone, is_pro, pro_expiry, passcode FROM users WHERE username=? AND password=?", (username, hashed_p))
     user = c.fetchone()
     conn.close()
     return user
 
 def update_pro_status(username, days=30):
     expiry_date = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    new_passcode = generate_passcode()
     conn = sqlite3.connect("users_database.db")
     c = conn.cursor()
-    c.execute("UPDATE users SET is_pro=1, pro_expiry=? WHERE username=?", (expiry_date, username))
+    c.execute("UPDATE users SET is_pro=1, pro_expiry=?, passcode=? WHERE username=?", (expiry_date, new_passcode, username))
     conn.commit()
     conn.close()
-    return expiry_date
+    return expiry_date, new_passcode
 
 def check_user_pro_validity(username):
     conn = sqlite3.connect("users_database.db")
     c = conn.cursor()
-    c.execute("SELECT is_pro, pro_expiry FROM users WHERE username=?", (username,))
+    c.execute("SELECT is_pro, pro_expiry, passcode FROM users WHERE username=?", (username,))
     row = c.fetchone()
     conn.close()
     
     if not row or row[0] == 0 or not row[1]:
-        return False, "Free Tier", 0
+        return False, "Free Tier", 0, None
     
     expiry_dt = datetime.strptime(row[1], "%Y-%m-%d %H:%M:%S")
     if datetime.now() > expiry_dt:
@@ -187,15 +200,15 @@ def check_user_pro_validity(username):
         c.execute("UPDATE users SET is_pro=0 WHERE username=?", (username,))
         conn.commit()
         conn.close()
-        return False, "Expired", 0
+        return False, "Expired", 0, None
     
     days_left = (expiry_dt - datetime.now()).days
-    return True, row[1], days_left
+    return True, row[1], days_left, row[2]
 
 def validate_and_process_txn(txn_id, username):
     txn_clean = txn_id.strip()
-    if len(txn_clean) < 10:
-        return False, "❌ Invalid Transaction ID! Kripya sahi UPI/Razorpay Reference ID daalein."
+    if len(txn_clean) < 10 or not txn_clean.isalnum():
+        return False, "❌ Invalid Transaction/UTR ID! Standard 12-digit UPI/Razorpay reference ID daalein.", None
     
     conn = sqlite3.connect("users_database.db")
     c = conn.cursor()
@@ -204,15 +217,15 @@ def validate_and_process_txn(txn_id, username):
     
     if existing:
         conn.close()
-        return False, "⚠️ Yeh Transaction ID pehle se use ho chuki hai!"
+        return False, "⚠️ Yeh Transaction ID pehle se istemal ho chuki hai!", None
     
     c.execute("INSERT INTO transactions (txn_id, username, status, timestamp) VALUES (?, ?, 'APPROVED', ?)",
               (txn_clean, username, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     conn.commit()
     conn.close()
     
-    expiry = update_pro_status(username, days=30)
-    return True, f"🎉 Payment Verified! Pro Plan Activated till {expiry}."
+    expiry, pass_key = update_pro_status(username, days=30)
+    return True, f"🎉 Payment Verified! Pro Plan Activated till {expiry}.", pass_key
 
 # =========================================================
 # SESSION STATE INITIALIZATION
@@ -225,13 +238,15 @@ if "show_pro_popup" not in st.session_state:
     st.session_state.show_pro_popup = False
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
+if "query_count" not in st.session_state:
+    st.session_state.query_count = 0
 
 # =========================================================
 # AI ENGINE
 # =========================================================
 def call_ai(prompt, image=None):
     if not api_key:
-        raise Exception("GEMINI_API_KEY missing in Secrets.")
+        raise Exception("GEMINI_API_KEY missing in Streamlit Secrets.")
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -270,34 +285,34 @@ def call_ai(prompt, image=None):
 # =========================================================
 # PRO PAYMENT DIALOG
 # =========================================================
-@st.dialog("💎 Unlock Student AI Pro")
+@st.dialog("💎 Unlock Student AI Pro Plan")
 def premium_popup():
-    st.markdown("### 👑 STUDENT AI PRO (30 Days)")
-    st.write("Unlock Unlimited PDF Processing, Image Solving & Instant MCQs Generator.")
-    st.markdown("### 🏷️ Fixed Plan: **₹99 / Month**")
+    st.markdown("### 👑 STUDENT AI PRO (30 Days Validity)")
+    st.write("Get Unlimited PDF Extraction, Photo Solver & Instant Exam Question Generation.")
+    st.markdown("### 🏷️ Fixed Rate: **₹99 / Month**")
     st.markdown("---")
     
-    st.markdown("**Step 1: Direct ₹99 Payment Link**")
-    st.link_button("💳 Pay ₹99 via Razorpay / UPI", RAZORPAY_PAY_LINK, type="primary", use_container_width=True)
-    st.caption("⚡ Direct ₹99 auto-filled link for fast UPI checkout.")
+    st.markdown("**Step 1: Direct Payment Link**")
+    st.link_button("💳 Open Razorpay ₹99 Gateway", RAZORPAY_PAY_LINK, type="primary", use_container_width=True)
+    st.caption("🔒 Kripya Exact ₹99 pay karein. Ref ID verification automated hai.")
 
     st.markdown("---")
-    st.markdown("**Step 2: Submit Payment Transaction / UTR ID**")
-    txn_input = st.text_input("🔐 Enter 12-Digit UPI Ref / Transaction ID:", placeholder="e.g. 423812908312")
+    st.markdown("**Step 2: Submit Payment UTR / Transaction Ref ID**")
+    txn_input = st.text_input("🔐 Enter 12-Digit UPI / Razorpay Reference ID:", placeholder="e.g. 423812908312")
 
     unlock_col, close_col = st.columns(2)
     with unlock_col:
-        if st.button("👑 Verify & Unlock Pro", type="primary", use_container_width=True):
+        if st.button("👑 Verify & Unlock Now", type="primary", use_container_width=True):
             if txn_input.strip() == PRO_PASSCODE:
-                expiry = update_pro_status(st.session_state.user_data["username"])
+                expiry, pass_key = update_pro_status(st.session_state.user_data["username"])
                 st.session_state.show_pro_popup = False
-                st.success(f"🎉 Admin Passcode Accepted! Active till {expiry}.")
+                st.success(f"🎉 Admin Passcode Accepted! Active till {expiry}. Your Key: {pass_key}")
                 st.rerun()
             else:
-                success, msg = validate_and_process_txn(txn_input, st.session_state.user_data["username"])
+                success, msg, pass_key = validate_and_process_txn(txn_input, st.session_state.user_data["username"])
                 if success:
                     st.session_state.show_pro_popup = False
-                    st.success(msg)
+                    st.success(f"{msg}\n\n🔑 Generated Passcode Key: **{pass_key}**")
                     st.rerun()
                 else:
                     st.error(msg)
@@ -314,8 +329,8 @@ if st.session_state.show_pro_popup:
 # =========================================================
 if not st.session_state.is_logged_in:
     st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("### 🛡️ Student AI")
-    st.caption("Created by **MG Gangwar** | Instant Cyber Assistance, Exam Notes & MCQs")
+    st.markdown("### 🛡️ Student AI Hub")
+    st.caption("Created by **MG Gangwar** | High-Performance Cyber & Academic Assistant")
     st.divider()
 
     auth_tab1, auth_tab2 = st.tabs(["🔐 Login", "📝 Register New Account"])
@@ -327,19 +342,22 @@ if not st.session_state.is_logged_in:
             login_user = st.text_input("👤 Username", key="l_user")
             login_pass = st.text_input("🔑 Password", type="password", key="l_pass")
             
-            if st.button("🚀 Login", type="primary", use_container_width=True):
-                user = validate_login(login_user.strip(), login_pass.strip())
-                if user:
-                    st.session_state.is_logged_in = True
-                    st.session_state.user_data = {
-                        "username": user[0],
-                        "full_name": user[1],
-                        "phone": user[2]
-                    }
-                    st.success("Login Successful!")
-                    st.rerun()
+            if st.button("🚀 Login To Dashboard", type="primary", use_container_width=True):
+                if login_user and login_pass:
+                    user = validate_login(login_user.strip(), login_pass.strip())
+                    if user:
+                        st.session_state.is_logged_in = True
+                        st.session_state.user_data = {
+                            "username": user[0],
+                            "full_name": user[1],
+                            "phone": user[2]
+                        }
+                        st.success("Login Successful!")
+                        st.rerun()
+                    else:
+                        st.error("❌ Galat Username ya Password! Sahi credentials se try karein.")
                 else:
-                    st.error("❌ Galat Username ya Password!")
+                    st.warning("Kripya Username aur Password dono bharen.")
 
     with auth_tab2:
         col1, col2, col3 = st.columns([1, 2, 1])
@@ -347,31 +365,31 @@ if not st.session_state.is_logged_in:
             st.subheader("Create Account")
             reg_name = st.text_input("Full Name", key="r_name")
             reg_phone = st.text_input("Mobile Number", key="r_phone")
-            reg_user = st.text_input("Choose Username", key="r_user")
+            reg_user = st.text_input("Choose Unique Username", key="r_user")
             reg_pass = st.text_input("Choose Password", type="password", key="r_pass")
             
-            if st.button("📝 Register Account", use_container_width=True):
+            if st.button("📝 Complete Registration", use_container_width=True):
                 if reg_user and reg_pass and reg_name:
                     success, msg = register_user(reg_user.strip(), reg_pass.strip(), reg_name.strip(), reg_phone.strip())
                     if success:
-                        st.success(msg + " Login Tab par jaakar login karein.")
+                        st.success(msg)
                     else:
                         st.error(msg)
                 else:
-                    st.warning("Sabhi details bharna zaroori hai!")
+                    st.warning("Sabhi detail fields required hain!")
 
 # =========================================================
-# PAGE 2: MAIN DASHBOARD & SYSTEM
+# PAGE 2: MAIN MULTI-PAGE APPLICATION
 # =========================================================
 else:
     username = st.session_state.user_data["username"]
-    is_pro, expiry_info, days_left = check_user_pro_validity(username)
+    is_pro, expiry_info, days_left, passcode_key = check_user_pro_validity(username)
 
-    # TOP HEADER (COMPACT LOGO & TITLE)
+    # TOP HEADER
     head_col1, head_col2 = st.columns([4, 1])
     with head_col1:
-        st.markdown("### 🛡️ Student AI")
-        st.caption(f"User: **{st.session_state.user_data['full_name']}** (@{username})")
+        st.markdown("### 🛡️ Student AI Platform")
+        st.caption(f"Welcome back, **{st.session_state.user_data['full_name']}** (@{username})")
 
     with head_col2:
         if not is_pro:
@@ -385,27 +403,58 @@ else:
 
     # SIDEBAR
     with st.sidebar:
-        st.markdown("### 👤 User Account")
+        st.markdown("### 👤 Account Overview")
         st.write(f"**Name:** {st.session_state.user_data['full_name']}")
-        st.write(f"**Plan:** {'👑 PRO Member' if is_pro else '🆓 Free User'}")
+        st.write(f"**Status:** {'👑 PRO Member' if is_pro else '🆓 Free User'}")
         if is_pro:
-            st.caption(f"Expires in: **{days_left} Days**")
+            st.caption(f"Valid for: **{days_left} Days**")
+            st.caption(f"Passcode Key: `{passcode_key}`")
             if days_left <= 5:
                 if st.button("🔄 Renew Plan (₹99)", type="primary", use_container_width=True):
                     st.session_state.show_pro_popup = True
                     st.rerun()
 
+        st.divider()
+        st.markdown("### 📌 App Navigation")
+        app_page = st.selectbox("Switch Page:", [
+            "🏠 Dashboard", 
+            "🤖 Student AI Tools", 
+            "👤 User Profile & Passcode", 
+            "ℹ️ About Developer & Platform"
+        ])
+
+        st.divider()
         if st.button("🔒 Logout", use_container_width=True):
             st.session_state.is_logged_in = False
             st.session_state.user_data = None
             st.rerun()
 
-        st.divider()
-        st.markdown("### 📌 Navigation")
-        app_page = st.selectbox("Choose Page:", ["🤖 Student AI Tools", "👤 My Profile", "ℹ️ About App & Developer"])
+    # ---------------------------------------------------------
+    # PAGE A: DASHBOARD
+    # ---------------------------------------------------------
+    if app_page == "🏠 Dashboard":
+        st.subheader("📊 User Performance & Usage Analytics")
+        
+        m1, m2, m3 = st.columns(3)
+        with m1:
+            st.markdown(f'<div class="metric-card"><h4>Plan Tier</h4><h3>{"PRO 👑" if is_pro else "FREE 🆓"}</h3></div>', unsafe_allow_html=True)
+        with m2:
+            st.markdown(f'<div class="metric-card"><h4>Days Remaining</h4><h3>{days_left if is_pro else 0} Days</h3></div>', unsafe_allow_html=True)
+        with m3:
+            st.markdown(f'<div class="metric-card"><h4>Queries Used</h4><h3>{st.session_state.query_count}</h3></div>', unsafe_allow_html=True)
 
-    # PAGE 1: STUDENT AI TOOLS
-    if app_page == "🤖 Student AI Tools":
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("#### 🚀 Quick Actions")
+        q1, q2 = st.columns(2)
+        with q1:
+            st.info("📂 **Process PDF Notes**\n\nUpload documents and generate revision points or MCQs instantly.")
+        with q2:
+            st.info("📷 **Photo Question Solver**\n\nTake pictures of handwritten or printed questions to get instant step-by-step solutions.")
+
+    # ---------------------------------------------------------
+    # PAGE B: STUDENT AI TOOLS
+    # ---------------------------------------------------------
+    elif app_page == "🤖 Student AI Tools":
         tab1, tab2, tab3 = st.tabs(["📂 PDF Analysis", "📷 Image Solver", "💬 Direct Ask Question"])
 
         # TAB 1: PDF ANALYSIS
@@ -421,15 +470,15 @@ else:
                     if pdf_page_count > 3 and not is_pro:
                         st.warning(f"🔒 PDF me **{pdf_page_count} pages** hain. Free plan me pehle 3 pages process honge.")
                 except Exception as e:
-                    st.error(f"PDF Error: {e}")
+                    st.error(f"PDF Parsing Error: {e}")
 
             feature = st.radio("Generate Output:", ["⚡ Revision Notes", "🎯 Exam Questions", "🧪 Practice MCQs"], horizontal=True)
 
-            if st.button("🚀 Process PDF", type="primary", use_container_width=True):
+            if st.button("🚀 Process PDF Document", type="primary", use_container_width=True):
                 if not uploaded_file:
-                    st.warning("Pehle PDF Upload karein!")
+                    st.warning("Pehle PDF File upload karein!")
                 else:
-                    with st.spinner("Processing PDF..."):
+                    with st.spinner("Analyzing PDF content..."):
                         reader = PdfReader(io.BytesIO(uploaded_file.getvalue()))
                         text = ""
                         max_p = len(reader.pages) if is_pro else min(3, len(reader.pages))
@@ -437,100 +486,34 @@ else:
                             text += p.extract_text() or ""
                         
                         ans = call_ai(f"Create structured {feature} from this text:\n\n{text[:100000]}")
-                        st.markdown("### 📋 AI Result")
+                        st.session_state.query_count += 1
+                        st.markdown("### 📋 AI Generated Output")
                         st.write(ans)
 
         # TAB 2: IMAGE SOLVER
         with tab2:
-            st.subheader("📷 Photo / Question Solver")
+            st.subheader("📷 Photo / Problem Solver")
             if not is_pro:
-                st.info("🔒 Image Solver PRO Feature hai.")
+                st.info("🔒 Image Solver ek PRO Feature hai.")
                 if st.button("Unlock Image Solver @ ₹99", type="primary"):
                     st.session_state.show_pro_popup = True
                     st.rerun()
             else:
-                uploaded_img = st.file_uploader("Upload Question Image:", type=["jpg", "png", "jpeg"])
+                uploaded_img = st.file_uploader("Upload Problem Image:", type=["jpg", "png", "jpeg"])
                 if uploaded_img:
                     img = Image.open(uploaded_img)
-                    st.image(img, caption="Uploaded Image", width=300)
-                    if st.button("⚡ Solve Image", type="primary"):
-                        with st.spinner("Solving..."):
-                            res = call_ai("Solve and explain this image step-by-step:", image=img)
-                            st.markdown("### 💡 Solution")
+                    st.image(img, caption="Target Question Image", width=320)
+                    if st.button("⚡ Solve Step-By-Step", type="primary"):
+                        with st.spinner("Analyzing visual elements..."):
+                            res = call_ai("Solve and explain this image step-by-step in detail:", image=img)
+                            st.session_state.query_count += 1
+                            st.markdown("### 💡 Detailed Solution")
                             st.write(res)
 
         # TAB 3: CHATGPT STYLE DIRECT ASK
         with tab3:
-            st.subheader("💬 Direct Ask Question")
-            st.caption("Answers scrollable area me display honge.")
-
-            if st.session_state.chat_history:
-                for q, a in st.session_state.chat_history:
-                    st.markdown(f"**❓ Q:** {q}")
-                    st.markdown(f"**🤖 A:** {a}")
-                    st.divider()
-
-            st.markdown('<div class="gemini-dock-wrapper"><div class="dock-container">', unsafe_allow_html=True)
-            with st.container():
-                c1, c2 = st.columns([5, 1])
-                with c1:
-                    query = st.text_input("Ask any doubt...", key="dock_query", label_visibility="collapsed", placeholder="e.g. Explain Python OOPS Concepts")
-                with c2:
-                    ask_btn = st.button("⚡ Ask", key="dock_btn", type="primary", use_container_width=True)
-            st.markdown('</div></div>', unsafe_allow_html=True)
-
-            if ask_btn and query:
-                with st.spinner("Generating..."):
-                    ans = call_ai(query)
-                    st.session_state.chat_history.append((query, ans))
-                    st.rerun()
-
-    # PAGE 2: MY PROFILE & RENEWAL
-    elif app_page == "👤 My Profile":
-        st.subheader("👤 My Profile Dashboard")
-        st.markdown(f"""
-        <div class="profile-card">
-            <h3>Name: {st.session_state.user_data['full_name']}</h3>
-            <p><b>Username:</b> @{username}</p>
-            <p><b>Mobile:</b> {st.session_state.user_data['phone'] or 'N/A'}</p>
-            <p><b>Membership Status:</b> {'👑 PRO Member' if is_pro else '🆓 Free Plan'}</p>
-            <p><b>Days Remaining:</b> {days_left if is_pro else '0'} Days</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-        if not is_pro or days_left <= 5:
-            st.subheader("🔄 Subscription & Renewal")
-            if st.button("⭐ Upgrade / Renew Plan (₹99)", type="primary"):
-                st.session_state.show_pro_popup = True
-                st.rerun()
-
-    # PAGE 3: ABOUT APP & DEVELOPER (WITH LOCAL GITHUB PROFILE PHOTO)
-    elif app_page == "ℹ️ About App & Developer":
-        st.subheader("ℹ️ About Student AI Platform")
-        
-        col_dev1, col_dev2 = st.columns([1, 2])
-        
-        with col_dev1:
-            # Tries to load local image from repository, fallback to online avatar
-            if os.path.exists("profile.jpg"):
-                st.image("profile.jpg", caption="MG Gangwar (Founder)", width=200)
-            elif os.path.exists("profile.png"):
-                st.image("profile.png", caption="MG Gangwar (Founder)", width=200)
-            else:
-                st.image("https://github.com/identicons/mggangwar.png", caption="MG Gangwar (Founder)", width=200)
-        
-        with col_dev2:
-            st.markdown("""
-            ### 👑 Created By: **MG Gangwar**
-            **Student AI** ek high-performance AI platform hai jise specifically Students aur Cyber Security aspirants ke liye design kiya gaya hai.
-
-            ---
-            #### 🚀 Core Features & Technologies:
-            * **PDF Analysis Engine:** 3-second instant extraction for revision notes, MCQs & exam questions.
-            * **Photo / Diagram Solver:** Step-by-step visual problem solver.
-            * **ChatGPT-like Realtime Dock:** Bottom floating input dock for instant responses.
-            * **Automated Expiry System:** 30-day Pro plan validity with automated database renewal logic.
+            st.subheader("💬 Direct Interactive AI Assistant")
             
-            **Support Email:** support@gmcyber.com  
-            **Developer:** MG Gangwar (GM Cyber Solutions)
-            """)
+            c_top1, c_top2 = st.columns([4, 1])
+            with c_top2:
+                if st.button("🗑️ Clear Chat"):
