@@ -520,6 +520,6 @@ else:
                 st.image("https://github.com/identicons/mggangwar.png", caption="MG Gangwar (Founder)", width=200)
         
         with col_dev2:
-            st.markdown("""
+            st.markdown("")
             ### 👑 Created By: **MG Gangwar**
             **Student AI** ek high-performance AI platform hai jise specifically Students aur C
