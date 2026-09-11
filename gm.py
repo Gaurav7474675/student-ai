@@ -522,4 +522,15 @@ else:
         with col_dev2:
             st.markdown("""
             ### 👑 Created By: **MG Gangwar**
-            **Student AI** ek high-performance AI platform hai jise specifically Students aur C
+            **Student AI** ek high-performance AI platform hai jise specifically Students aur Cyber Security aspirants ke liye design kiya gaya hai.
+
+            ---
+            #### 🚀 Core Features & Technologies:
+            * **PDF Analysis Engine:** 3-second instant extraction for revision notes, MCQs & exam questions.
+            * **Photo / Diagram Solver:** Step-by-step visual problem solver.
+            * **ChatGPT-like Realtime Dock:** Bottom floating input dock for instant responses.
+            * **Automated Expiry System:** 30-day Pro plan validity with automated database renewal logic.
+            
+            **Support Email:** support@gmcyber.com  
+            **Developer:** MG Gangwar (GM Cyber Solutions)
+            """)
