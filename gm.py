@@ -6,6 +6,7 @@ import os
 import base64
 import io
 import sqlite3
+import re
 from datetime import datetime, timedelta
 
 # =========================================================
@@ -24,10 +25,10 @@ hide_streamlit_style = """
 st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
 # =========================================================
-# PAGE CONFIG & CSS
+# PAGE CONFIG & ADVANCED CSS
 # =========================================================
 st.set_page_config(
-    page_title="Student AI - Pro Platform",
+    page_title="Student AI",
     page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -45,8 +46,8 @@ st.markdown(
         animation: none !important;
     }
     .block-container {
-        max-width: 1000px;
-        padding-top: 1.5rem;
+        max-width: 950px;
+        padding-top: 1rem;
         padding-bottom: 140px !important;
     }
     section[data-testid="stSidebar"] {
@@ -91,6 +92,11 @@ st.markdown(
         border: 1px solid #202938;
         margin-bottom: 20px;
     }
+    .header-title-box {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
     </style>
     """,
     unsafe_allow_html=True
@@ -101,7 +107,9 @@ st.markdown(
 # =========================================================
 api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
 PRO_PASSCODE = st.secrets.get("PRO_PASSCODE") or os.environ.get("PRO_PASSCODE") or "GMCYBER2026"
-RAZORPAY_KEY_ID = st.secrets.get("RAZORPAY_KEY_ID") or "rzp_test_YourKeyHere"
+
+# FIXED ₹99 PAYMENT LINK WITH PRE-FILLED AMOUNT
+RAZORPAY_PAY_LINK = "https://razorpay.me/@gaurav1324?amount=9900"
 
 # =========================================================
 # SQLITE DATABASE MANAGEMENT
@@ -117,6 +125,14 @@ def init_db():
             phone TEXT,
             is_pro INTEGER DEFAULT 0,
             pro_expiry TEXT
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS transactions (
+            txn_id TEXT PRIMARY KEY,
+            username TEXT,
+            status TEXT,
+            timestamp TEXT
         )
     ''')
     conn.commit()
@@ -166,7 +182,6 @@ def check_user_pro_validity(username):
     
     expiry_dt = datetime.strptime(row[1], "%Y-%m-%d %H:%M:%S")
     if datetime.now() > expiry_dt:
-        # Plan Expired, Revert to Free
         conn = sqlite3.connect("users_database.db")
         c = conn.cursor()
         c.execute("UPDATE users SET is_pro=0 WHERE username=?", (username,))
@@ -176,6 +191,28 @@ def check_user_pro_validity(username):
     
     days_left = (expiry_dt - datetime.now()).days
     return True, row[1], days_left
+
+def validate_and_process_txn(txn_id, username):
+    txn_clean = txn_id.strip()
+    if len(txn_clean) < 10:
+        return False, "❌ Invalid Transaction ID! Kripya sahi UPI/Razorpay Reference ID daalein."
+    
+    conn = sqlite3.connect("users_database.db")
+    c = conn.cursor()
+    c.execute("SELECT txn_id FROM transactions WHERE txn_id=?", (txn_clean,))
+    existing = c.fetchone()
+    
+    if existing:
+        conn.close()
+        return False, "⚠️ Yeh Transaction ID pehle se use ho chuki hai!"
+    
+    c.execute("INSERT INTO transactions (txn_id, username, status, timestamp) VALUES (?, ?, 'APPROVED', ?)",
+              (txn_clean, username, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+    conn.commit()
+    conn.close()
+    
+    expiry = update_pro_status(username, days=30)
+    return True, f"🎉 Payment Verified! Pro Plan Activated till {expiry}."
 
 # =========================================================
 # SESSION STATE INITIALIZATION
@@ -231,34 +268,39 @@ def call_ai(prompt, image=None):
         raise Exception(f"API Error: {response.text}")
 
 # =========================================================
-# PRO PAYMENT DIALOG (FIXED ₹99 SECURE PAYMENT)
+# PRO PAYMENT DIALOG
 # =========================================================
-@st.dialog("💎 Upgrade to Student AI Pro")
+@st.dialog("💎 Unlock Student AI Pro")
 def premium_popup():
     st.markdown("### 👑 STUDENT AI PRO (30 Days)")
-    st.write("Get Unlimited PDF Analysis, Image Solver & Instant Exam Notes.")
-    st.markdown("### 🏷️ Fixed Price: **₹99 / Month**")
+    st.write("Unlock Unlimited PDF Processing, Image Solving & Instant MCQs Generator.")
+    st.markdown("### 🏷️ Fixed Plan: **₹99 / Month**")
     st.markdown("---")
     
-    st.markdown("**Option 1: Direct Payment Link (Fixed ₹99)**")
-    # Custom link or Razorpay fixed amount link
-    st.link_button("💳 Pay ₹99 via Razorpay", "https://razorpay.me/@gaurav1324", type="primary", use_container_width=True)
-    st.caption("Note: Payment complete hone ke baad Passcode enter karein.")
+    st.markdown("**Step 1: Direct ₹99 Payment Link**")
+    st.link_button("💳 Pay ₹99 via Razorpay / UPI", RAZORPAY_PAY_LINK, type="primary", use_container_width=True)
+    st.caption("⚡ Direct ₹99 auto-filled link for fast UPI checkout.")
 
     st.markdown("---")
-    st.markdown("**Option 2: Activate via Passcode**")
-    passcode = st.text_input("🔐 Enter 16-Digit Transaction Passcode:", type="password")
+    st.markdown("**Step 2: Submit Payment Transaction / UTR ID**")
+    txn_input = st.text_input("🔐 Enter 12-Digit UPI Ref / Transaction ID:", placeholder="e.g. 423812908312")
 
     unlock_col, close_col = st.columns(2)
     with unlock_col:
-        if st.button("👑 Unlock Pro (30 Days)", type="primary", use_container_width=True):
-            if passcode == PRO_PASSCODE:
+        if st.button("👑 Verify & Unlock Pro", type="primary", use_container_width=True):
+            if txn_input.strip() == PRO_PASSCODE:
                 expiry = update_pro_status(st.session_state.user_data["username"])
                 st.session_state.show_pro_popup = False
-                st.success(f"🎉 Pro Plan Activated till {expiry}!")
+                st.success(f"🎉 Admin Passcode Accepted! Active till {expiry}.")
                 st.rerun()
-            elif passcode:
-                st.error("❌ Invalid Passcode!")
+            else:
+                success, msg = validate_and_process_txn(txn_input, st.session_state.user_data["username"])
+                if success:
+                    st.session_state.show_pro_popup = False
+                    st.success(msg)
+                    st.rerun()
+                else:
+                    st.error(msg)
     with close_col:
         if st.button("Close", use_container_width=True):
             st.session_state.show_pro_popup = False
@@ -268,11 +310,11 @@ if st.session_state.show_pro_popup:
     premium_popup()
 
 # =========================================================
-# PAGE 1: PROFESSIONAL AUTHENTICATION (LOGIN / REGISTER)
+# PAGE 1: LOGIN / REGISTER SCREEN
 # =========================================================
 if not st.session_state.is_logged_in:
     st.markdown("<br>", unsafe_allow_html=True)
-    st.title("🛡️ STUDENT AI PLATFORM")
+    st.markdown("### 🛡️ Student AI")
     st.caption("Created by **MG Gangwar** | Instant Cyber Assistance, Exam Notes & MCQs")
     st.divider()
 
@@ -302,7 +344,7 @@ if not st.session_state.is_logged_in:
     with auth_tab2:
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            st.subheader("Create New Account")
+            st.subheader("Create Account")
             reg_name = st.text_input("Full Name", key="r_name")
             reg_phone = st.text_input("Mobile Number", key="r_phone")
             reg_user = st.text_input("Choose Username", key="r_user")
@@ -312,24 +354,24 @@ if not st.session_state.is_logged_in:
                 if reg_user and reg_pass and reg_name:
                     success, msg = register_user(reg_user.strip(), reg_pass.strip(), reg_name.strip(), reg_phone.strip())
                     if success:
-                        st.success(msg + " Ab Login Tab par jaakar login karein.")
+                        st.success(msg + " Login Tab par jaakar login karein.")
                     else:
                         st.error(msg)
                 else:
-                    st.warning("Sabhi fields bharna zaroori hai!")
+                    st.warning("Sabhi details bharna zaroori hai!")
 
 # =========================================================
-# PAGE 2: MAIN DASHBOARD & APPLICATION
+# PAGE 2: MAIN DASHBOARD & SYSTEM
 # =========================================================
 else:
     username = st.session_state.user_data["username"]
     is_pro, expiry_info, days_left = check_user_pro_validity(username)
 
-    # TOP HEADER
+    # TOP HEADER (COMPACT LOGO & TITLE)
     head_col1, head_col2 = st.columns([4, 1])
     with head_col1:
-        st.title("🛡️ STUDENT AI")
-        st.caption(f"Logged in as: **{st.session_state.user_data['full_name']}** (@{username})")
+        st.markdown("### 🛡️ Student AI")
+        st.caption(f"User: **{st.session_state.user_data['full_name']}** (@{username})")
 
     with head_col2:
         if not is_pro:
@@ -337,17 +379,21 @@ else:
                 st.session_state.show_pro_popup = True
                 st.rerun()
         else:
-            st.success(f"👑 Pro ({days_left} Days Left)")
+            st.success(f"👑 Pro ({days_left}d Left)")
 
     st.divider()
 
     # SIDEBAR
     with st.sidebar:
-        st.markdown("### 👤 User Profile")
+        st.markdown("### 👤 User Account")
         st.write(f"**Name:** {st.session_state.user_data['full_name']}")
-        st.write(f"**Status:** {'👑 PRO Member' if is_pro else '🆓 Free User'}")
+        st.write(f"**Plan:** {'👑 PRO Member' if is_pro else '🆓 Free User'}")
         if is_pro:
-            st.caption(f"Plan Expires in: **{days_left} Days**")
+            st.caption(f"Expires in: **{days_left} Days**")
+            if days_left <= 5:
+                if st.button("🔄 Renew Plan (₹99)", type="primary", use_container_width=True):
+                    st.session_state.show_pro_popup = True
+                    st.rerun()
 
         if st.button("🔒 Logout", use_container_width=True):
             st.session_state.is_logged_in = False
@@ -356,16 +402,16 @@ else:
 
         st.divider()
         st.markdown("### 📌 Navigation")
-        app_page = st.radio("Select View:", ["🤖 Student AI Tools", "👤 My Profile & Account", "ℹ️ About App & Developer"])
+        app_page = st.selectbox("Choose Page:", ["🤖 Student AI Tools", "👤 My Profile", "ℹ️ About App & Developer"])
 
-    # PAGE 1: MAIN STUDENT AI TOOLS
+    # PAGE 1: STUDENT AI TOOLS
     if app_page == "🤖 Student AI Tools":
         tab1, tab2, tab3 = st.tabs(["📂 PDF Analysis", "📷 Image Solver", "💬 Direct Ask Question"])
 
-        # TAB 1: PDF
+        # TAB 1: PDF ANALYSIS
         with tab1:
             st.subheader("📂 PDF Notes & MCQ Generator")
-            uploaded_file = st.file_uploader("PDF File Upload Karein:", type=["pdf"])
+            uploaded_file = st.file_uploader("Upload PDF File:", type=["pdf"])
 
             pdf_page_count = 0
             if uploaded_file:
@@ -373,7 +419,7 @@ else:
                     pdf_reader = PdfReader(io.BytesIO(uploaded_file.getvalue()))
                     pdf_page_count = len(pdf_reader.pages)
                     if pdf_page_count > 3 and not is_pro:
-                        st.warning(f"🔒 PDF me **{pdf_page_count} pages** hain. Free version me sirf pehle 3 pages process honge.")
+                        st.warning(f"🔒 PDF me **{pdf_page_count} pages** hain. Free plan me pehle 3 pages process honge.")
                 except Exception as e:
                     st.error(f"PDF Error: {e}")
 
@@ -398,7 +444,7 @@ else:
         with tab2:
             st.subheader("📷 Photo / Question Solver")
             if not is_pro:
-                st.info("🔒 Image Solver is a PRO Feature.")
+                st.info("🔒 Image Solver PRO Feature hai.")
                 if st.button("Unlock Image Solver @ ₹99", type="primary"):
                     st.session_state.show_pro_popup = True
                     st.rerun()
@@ -413,10 +459,10 @@ else:
                             st.markdown("### 💡 Solution")
                             st.write(res)
 
-        # TAB 3: DIRECT ASK (GEMINI BOTTOM DOCK)
+        # TAB 3: CHATGPT STYLE DIRECT ASK
         with tab3:
             st.subheader("💬 Direct Ask Question")
-            st.caption("Answers scrollable window me aayenge.")
+            st.caption("Answers scrollable area me display honge.")
 
             if st.session_state.chat_history:
                 for q, a in st.session_state.chat_history:
@@ -439,8 +485,8 @@ else:
                     st.session_state.chat_history.append((query, ans))
                     st.rerun()
 
-    # PAGE 2: USER PROFILE
-    elif app_page == "👤 My Profile & Account":
+    # PAGE 2: MY PROFILE & RENEWAL
+    elif app_page == "👤 My Profile":
         st.subheader("👤 My Profile Dashboard")
         st.markdown(f"""
         <div class="profile-card">
@@ -452,31 +498,28 @@ else:
         </div>
         """, unsafe_allow_html=True)
 
-        if not is_pro:
-            if st.button("⭐ Renew / Upgrade Plan (₹99)", type="primary"):
+        if not is_pro or days_left <= 5:
+            st.subheader("🔄 Subscription & Renewal")
+            if st.button("⭐ Upgrade / Renew Plan (₹99)", type="primary"):
                 st.session_state.show_pro_popup = True
                 st.rerun()
 
-    # PAGE 3: ABOUT APP & DEVELOPER
+    # PAGE 3: ABOUT APP & DEVELOPER (WITH LOCAL GITHUB PROFILE PHOTO)
     elif app_page == "ℹ️ About App & Developer":
         st.subheader("ℹ️ About Student AI Platform")
         
         col_dev1, col_dev2 = st.columns([1, 2])
+        
         with col_dev1:
-            st.image("https://api.dicebear.com/7.x/bottts/svg?seed=MG_Gangwar", caption="MG Gangwar (Founder)", width=180)
+            # Tries to load local image from repository, fallback to online avatar
+            if os.path.exists("profile.jpg"):
+                st.image("profile.jpg", caption="MG Gangwar (Founder)", width=200)
+            elif os.path.exists("profile.png"):
+                st.image("profile.png", caption="MG Gangwar (Founder)", width=200)
+            else:
+                st.image("https://github.com/identicons/mggangwar.png", caption="MG Gangwar (Founder)", width=200)
         
         with col_dev2:
             st.markdown("""
             ### 👑 Created By: **MG Gangwar**
-            **Student AI** ek advanced AI-powered learning platform hai jo students ko exam preparation, PDF notes extraction, question solving, aur instant doubt clearing me madad karta hai.
-
-            ---
-            #### 🎯 App Objectives & Features:
-            * **PDF Notes & MCQ Generator:** PDF se 3 sec me notes aur MCQs banayein.
-            * **Image Solver:** Mathematical diagrams aur Questions ka instant solution.
-            * **Gemini-style Bottom Dock:** Smooth aur fast chat experience.
-            * **Secure Multi-User Database:** Har user ka data aur active plan safe rehta hai.
-            
-            **Support Email:** support@gmcyber.com  
-            **Official Website:** GM Cyber AI Solutions
-            """)
+            **Student AI** ek high-performance AI platform hai jise specifically Students aur C
