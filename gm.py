@@ -11,9 +11,17 @@ import secrets
 from datetime import datetime, timedelta
 
 # =========================================================
-# STREAMLIT TOOLBAR & FOOTER HIDE
+# PAGE CONFIGURATION & CUSTOM NATIVE APP CSS
 # =========================================================
-hide_streamlit_style = """
+st.set_page_config(
+    page_title="Student AI - Pro Platform",
+    page_icon="🛡️",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+# Hide Streamlit Chrome UI & Add Custom App-Like Styling
+st.markdown("""
     <style>
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
@@ -21,35 +29,25 @@ hide_streamlit_style = """
     div[data-testid="stToolbar"] {display: none !important;}
     div[data-testid="stDecoration"] {display: none !important;}
     div[data-testid="stStatusWidget"] {visibility: hidden !important;}
-    </style>
-"""
-st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
-# =========================================================
-# PAGE CONFIG & ADVANCED CSS
-# =========================================================
-st.set_page_config(
-    page_title="Student AI - Pro Platform",
-    page_icon="🛡️",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-st.markdown(
-    """
-    <style>
     .stApp {
         background-color: #0E1117;
         color: #F4F7FB;
     }
     .block-container {
-        max-width: 1000px;
-        padding-top: 1.5rem;
-        padding-bottom: 120px;
+        max-width: 900px;
+        padding-top: 1rem;
+        padding-bottom: 100px;
     }
-    section[data-testid="stSidebar"] {
-        background-color: #121824;
-        border-right: 1px solid #202938;
+    .app-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background-color: #161F30;
+        padding: 12px 20px;
+        border-radius: 12px;
+        border: 1px solid #202938;
+        margin-bottom: 20px;
     }
     .stButton > button {
         border-radius: 10px;
@@ -58,6 +56,7 @@ st.markdown(
         color: #F8FAFC;
         font-weight: 600;
         width: 100%;
+        padding: 0.5rem 1rem;
     }
     .stButton > button:hover {
         border-color: #22C55E;
@@ -69,27 +68,18 @@ st.markdown(
         color: white !important;
         font-weight: 800 !important;
     }
-    .profile-card {
+    .card-box {
         background: #161F30;
-        padding: 24px;
+        padding: 20px;
         border-radius: 12px;
         border: 1px solid #202938;
-        margin-bottom: 20px;
-    }
-    .metric-card {
-        background: #111827;
-        padding: 15px;
-        border-radius: 8px;
-        border: 1px solid #1F2937;
-        text-align: center;
+        margin-bottom: 15px;
     }
     </style>
-    """,
-    unsafe_allow_html=True
-)
+""", unsafe_allow_html=True)
 
 # =========================================================
-# CONFIGS & DATABASE
+# CONFIGS & DATABASE ENGINE
 # =========================================================
 api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
 PRO_PASSCODE = st.secrets.get("PRO_PASSCODE") or os.environ.get("PRO_PASSCODE") or "GMCYBER2026"
@@ -137,10 +127,10 @@ def register_user(username, password, full_name, phone):
                   (username, hashed_p, full_name, phone))
         conn.commit()
         conn.close()
-        return True, "Account successfully created! Ab Login karein."
+        return True, "Account successfully ban gaya hai! Ab Login karein."
     except sqlite3.IntegrityError:
         conn.close()
-        return False, "Username pehle se exist karta hai!"
+        return False, "Username pehle se maujood hai!"
 
 def validate_login(username, password):
     conn = sqlite3.connect("users_database.db")
@@ -186,7 +176,7 @@ def check_user_pro_validity(username):
 def validate_and_process_txn(txn_id, username):
     txn_clean = txn_id.strip()
     if len(txn_clean) < 10 or not txn_clean.isalnum():
-        return False, "❌ Invalid Transaction ID! Standard 12-digit UPI/Razorpay Ref ID daalein.", None
+        return False, "❌ Invalid Transaction ID! Standard 12-digit Ref ID daalein.", None
     
     conn = sqlite3.connect("users_database.db")
     c = conn.cursor()
@@ -195,7 +185,7 @@ def validate_and_process_txn(txn_id, username):
     
     if existing:
         conn.close()
-        return False, "⚠️ Yeh Transaction ID pehle se used hai!", None
+        return False, "⚠️ Yeh Transaction ID pehle se istemal ho chuki hai!", None
     
     c.execute("INSERT INTO transactions (txn_id, username, status, timestamp) VALUES (?, ?, 'APPROVED', ?)",
               (txn_clean, username, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
@@ -206,25 +196,29 @@ def validate_and_process_txn(txn_id, username):
     return True, f"🎉 Pro Activated till {expiry}!", pass_key
 
 # =========================================================
-# SESSION STATE INITIALIZATION
+# SESSION STATE NAVIGATION & CONTROL
 # =========================================================
 if "is_logged_in" not in st.session_state:
     st.session_state.is_logged_in = False
 if "user_data" not in st.session_state:
     st.session_state.user_data = None
 if "current_page" not in st.session_state:
-    st.session_state.current_page = "🏠 Dashboard"
+    st.session_state.current_page = "Dashboard"
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "query_count" not in st.session_state:
     st.session_state.query_count = 0
 
+def navigate_to(page_name):
+    st.session_state.current_page = page_name
+    st.rerun()
+
 # =========================================================
-# AI ENGINE
+# AI INTEGRATION ENGINE
 # =========================================================
 def call_ai(prompt, image=None):
     if not api_key:
-        raise Exception("GEMINI_API_KEY Missing in Streamlit Secrets.")
+        return "⚠️ Gemini API Key config missing! Secrets me API Key add karein."
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -248,193 +242,190 @@ def call_ai(prompt, image=None):
         "max_tokens": 2000
     }
 
-    response = requests.post(
-        "https://openrouter.ai/api/v1/chat/completions",
-        headers=headers,
-        json=payload,
-        timeout=120
-    )
-
-    if response.status_code == 200:
-        return response.json()["choices"][0]["message"]["content"]
-    else:
-        raise Exception(f"API Error: {response.text}")
+    try:
+        response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload, timeout=120)
+        if response.status_code == 200:
+            return response.json()["choices"][0]["message"]["content"]
+        return f"Error: {response.text}"
+    except Exception as e:
+        return f"Network Error: {str(e)}"
 
 # =========================================================
-# LOGIN / REGISTER (FORM CONTROLLED - NO REFRESH GLITCH)
+# AUTHENTICATION SCREEN (NO REFRESH GLITCH)
 # =========================================================
 if not st.session_state.is_logged_in:
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown("### 🛡️ Student AI Platform")
-    st.caption("Created by **MG Gangwar** | Instant Cyber & Student Assistant")
+    st.markdown("### 🛡️ STUDENT AI")
+    st.caption("Created by **MG Gangwar** | Instant Cyber & Academic Assistant")
     st.divider()
 
     auth_tab1, auth_tab2 = st.tabs(["🔐 Login", "📝 Register New Account"])
 
     with auth_tab1:
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            st.subheader("Login To Account")
-            with st.form(key="login_form"):
-                login_user = st.text_input("👤 Username")
-                login_pass = st.text_input("🔑 Password", type="password")
-                submit_login = st.form_submit_button("🚀 Login", type="primary")
+        st.subheader("Sign In")
+        with st.form(key="login_form"):
+            login_user = st.text_input("👤 Username")
+            login_pass = st.text_input("🔑 Password", type="password")
+            submit_login = st.form_submit_button("🚀 Login Now", type="primary")
 
-            if submit_login:
-                if login_user and login_pass:
-                    user = validate_login(login_user.strip(), login_pass.strip())
-                    if user:
-                        st.session_state.is_logged_in = True
-                        st.session_state.user_data = {
-                            "username": user[0],
-                            "full_name": user[1],
-                            "phone": user[2]
-                        }
-                        st.success("Login Successful!")
-                        st.rerun()
-                    else:
-                        st.error("❌ Galat Username ya Password!")
+        if submit_login:
+            if login_user and login_pass:
+                user = validate_login(login_user.strip(), login_pass.strip())
+                if user:
+                    st.session_state.is_logged_in = True
+                    st.session_state.user_data = {
+                        "username": user[0],
+                        "full_name": user[1],
+                        "phone": user[2]
+                    }
+                    st.success("Login Successful!")
+                    st.rerun()
                 else:
-                    st.warning("Dono fields bharen.")
+                    st.error("❌ Galat Username ya Password!")
+            else:
+                st.warning("Dono fields fill karein.")
 
     with auth_tab2:
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            st.subheader("New Registration")
-            with st.form(key="reg_form"):
-                reg_name = st.text_input("Full Name")
-                reg_phone = st.text_input("Mobile Number")
-                reg_user = st.text_input("Choose Username")
-                reg_pass = st.text_input("Choose Password", type="password")
-                submit_reg = st.form_submit_button("📝 Register Now", type="primary")
+        st.subheader("Create Account")
+        with st.form(key="reg_form"):
+            reg_name = st.text_input("Full Name")
+            reg_phone = st.text_input("Mobile Number")
+            reg_user = st.text_input("Choose Username")
+            reg_pass = st.text_input("Choose Password", type="password")
+            submit_reg = st.form_submit_button("📝 Register Account", type="primary")
 
-            if submit_reg:
-                if reg_user and reg_pass and reg_name:
-                    success, msg = register_user(reg_user.strip(), reg_pass.strip(), reg_name.strip(), reg_phone.strip())
-                    if success:
-                        st.success(msg)
-                    else:
-                        st.error(msg)
+        if submit_reg:
+            if reg_user and reg_pass and reg_name:
+                success, msg = register_user(reg_user.strip(), reg_pass.strip(), reg_name.strip(), reg_phone.strip())
+                if success:
+                    st.success(msg)
                 else:
-                    st.warning("Sabhi fields required hain.")
+                    st.error(msg)
+            else:
+                st.warning("Sabhi detail bharna zaroori hai.")
 
 # =========================================================
-# MAIN APPLICATION INTERFACE
+# MAIN APP NAVIGATION & CORE INTERFACE
 # =========================================================
 else:
     username = st.session_state.user_data["username"]
     is_pro, expiry_info, days_left, passcode_key = check_user_pro_validity(username)
 
-    # SIDEBAR NAVIGATION
-    with st.sidebar:
-        st.markdown(f"### 👤 {st.session_state.user_data['full_name']}")
-        st.caption(f"Status: **{'👑 PRO' if is_pro else '🆓 FREE'}**")
-        if is_pro:
-            st.caption(f"Days Left: **{days_left} Days**")
+    # APP HEADER TOOLBAR
+    st.markdown(f"""
+    <div class="app-header">
+        <div>
+            <h3 style="margin:0; padding:0;">🛡️ Student AI</h3>
+            <span style="font-size:12px; color:#A0AEC0;">User: @{username} | Plan: <b>{'👑 PRO' if is_pro else '🆓 FREE'}</b></span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
-        st.divider()
-        st.markdown("### 📌 Navigation")
-        
-        if st.button("🏠 Dashboard"):
-            st.session_state.current_page = "🏠 Dashboard"
-            st.rerun()
-        if st.button("🤖 AI Student Tools"):
-            st.session_state.current_page = "🤖 AI Student Tools"
-            st.rerun()
-        if st.button("👤 Profile & Plan"):
-            st.session_state.current_page = "👤 Profile & Plan"
-            st.rerun()
-        if st.button("ℹ️ About App & Developer"):
-            st.session_state.current_page = "ℹ️ About App & Developer"
-            st.rerun()
-
-        st.divider()
-        if st.button("🔒 Logout"):
-            st.session_state.is_logged_in = False
-            st.session_state.user_data = None
-            st.rerun()
-
-    # HEADER
-    head1, head2 = st.columns([3, 1])
-    with head1:
-        st.title(f"Student AI — {st.session_state.current_page}")
-    with head2:
-        if not is_pro:
-            st.warning("Plan: Free Tier")
+    # TOP APP-LIKE BUTTON NAVIGATION & BACK CONTROL
+    nav_col1, nav_col2, nav_col3, nav_col4, nav_col5 = st.columns([1, 1, 1, 1, 1])
+    
+    with nav_col1:
+        if st.session_state.current_page != "Dashboard":
+            if st.button("⬅️ Back"):
+                navigate_to("Dashboard")
         else:
-            st.success(f"👑 Pro Active ({days_left}d)")
+            st.write("")
+
+    with nav_col2:
+        if st.button("🏠 Home"):
+            navigate_to("Dashboard")
+            
+    with nav_col3:
+        if st.button("🤖 Tools"):
+            navigate_to("Tools")
+            
+    with nav_col4:
+        if st.button("👤 Profile"):
+            navigate_to("Profile")
+            
+    with nav_col5:
+        if st.button("ℹ️ About"):
+            navigate_to("About")
 
     st.divider()
 
     # ---------------------------------------------------------
-    # PAGE 1: DASHBOARD
+    # PAGE: DASHBOARD
     # ---------------------------------------------------------
-    if st.session_state.current_page == "🏠 Dashboard":
-        m1, m2, m3 = st.columns(3)
-        with m1:
-            st.markdown(f'<div class="metric-card"><h4>Current Plan</h4><h3>{"PRO 👑" if is_pro else "FREE 🆓"}</h3></div>', unsafe_allow_html=True)
-        with m2:
-            st.markdown(f'<div class="metric-card"><h4>Pro Days Left</h4><h3>{days_left if is_pro else 0} Days</h3></div>', unsafe_allow_html=True)
-        with m3:
-            st.markdown(f'<div class="metric-card"><h4>Total Queries</h4><h3>{st.session_state.query_count}</h3></div>', unsafe_allow_html=True)
+    if st.session_state.current_page == "Dashboard":
+        col_m1, col_m2, col_m3 = st.columns(3)
+        with col_m1:
+            st.markdown(f'<div class="card-box" style="text-align:center;"><h4>Plan</h4><h3>{"PRO 👑" if is_pro else "FREE 🆓"}</h3></div>', unsafe_allow_html=True)
+        with col_m2:
+            st.markdown(f'<div class="card-box" style="text-align:center;"><h4>Days Left</h4><h3>{days_left if is_pro else 0}</h3></div>', unsafe_allow_html=True)
+        with col_m3:
+            st.markdown(f'<div class="card-box" style="text-align:center;"><h4>Queries</h4><h3>{st.session_state.query_count}</h3></div>', unsafe_allow_html=True)
 
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.subheader("⚡ Quick Start Features")
-        
-        c1, c2 = st.columns(2)
-        with c1:
-            st.info("📂 **PDF Analysis**\n\nNotes extraction aur MCQ generation tool use karein.")
-            if st.button("Go To PDF Tools"):
-                st.session_state.current_page = "🤖 AI Student Tools"
-                st.rerun()
-        with c2:
-            st.info("📷 **Photo Solver**\n\nExam/Homework questions image upload karke solve karein.")
-            if st.button("Go To Image Solver"):
-                st.session_state.current_page = "🤖 AI Student Tools"
-                st.rerun()
+        st.markdown("### ⚡ Fast Feature Access")
+        dash_c1, dash_c2 = st.columns(2)
+        with dash_c1:
+            st.markdown("""
+            <div class="card-box">
+                <h4>📂 PDF Notes Solver</h4>
+                <p>Upload lecture notes PDF to extract summaries and generate practice MCQs.</p>
+            </div>
+            """, unsafe_allow_html=True)
+            if st.button("Open PDF Solver"):
+                navigate_to("Tools")
+
+        with dash_c2:
+            st.markdown("""
+            <div class="card-box">
+                <h4>📷 Photo Problem Solver</h4>
+                <p>Upload handwritten exam questions or math problems for instant step-by-step resolution.</p>
+            </div>
+            """, unsafe_allow_html=True)
+            if st.button("Open Photo Solver"):
+                navigate_to("Tools")
 
     # ---------------------------------------------------------
-    # PAGE 2: AI TOOLS
+    # PAGE: AI TOOLS
     # ---------------------------------------------------------
-    elif st.session_state.current_page == "🤖 AI Student Tools":
-        tool_tab1, tool_tab2, tool_tab3 = st.tabs(["📂 PDF Solver", "📷 Image Solver", "💬 Interactive Chat"])
+    elif st.session_state.current_page == "Tools":
+        tool_tab1, tool_tab2, tool_tab3 = st.tabs(["📂 PDF Analysis", "📷 Photo Solver", "💬 Direct Chat"])
 
         with tool_tab1:
-            st.subheader("📂 PDF Document Processor")
-            pdf_file = st.file_uploader("Upload Notes/Book PDF:", type=["pdf"])
-            feature = st.radio("Generate Format:", ["Revision Notes", "Exam Questions", "Practice MCQs"], horizontal=True)
+            st.subheader("📂 Upload Notes / Book PDF")
+            pdf_file = st.file_uploader("Choose PDF File:", type=["pdf"])
+            feature = st.radio("Generate:", ["Quick Revision Notes", "Important Exam Questions", "Practice Quiz (MCQs)", "Cyber Security & Code Analysis"], horizontal=True)
 
             if st.button("🚀 Process PDF", type="primary"):
                 if pdf_file:
-                    with st.spinner("Processing..."):
+                    with st.spinner("Analyzing PDF..."):
                         reader = PdfReader(io.BytesIO(pdf_file.getvalue()))
                         max_p = len(reader.pages) if is_pro else min(3, len(reader.pages))
                         text = "".join([p.extract_text() or "" for p in reader.pages[:max_p]])
                         res = call_ai(f"Generate {feature} for:\n\n{text[:80000]}")
                         st.session_state.query_count += 1
-                        st.markdown("### Result:")
+                        st.markdown("### Solution:")
                         st.write(res)
                 else:
-                    st.warning("Pehle PDF file upload karein!")
+                    st.warning("Kripya pehle PDF file select karein.")
 
         with tool_tab2:
             st.subheader("📷 Photo / Problem Solver")
             if not is_pro:
                 st.error("🔒 Photo Solver unlocks only in PRO Membership!")
+                if st.button("Upgrade to Pro Plan"):
+                    navigate_to("Profile")
             else:
-                img_file = st.file_uploader("Upload Question Picture:", type=["jpg", "png", "jpeg"])
+                img_file = st.file_uploader("Upload Question Image:", type=["jpg", "png", "jpeg"])
                 if img_file:
                     img = Image.open(img_file)
                     st.image(img, width=300)
                     if st.button("⚡ Solve Step-By-Step", type="primary"):
-                        with st.spinner("Solving..."):
-                            res = call_ai("Solve this problem in detail with full explanations:", image=img)
+                        with st.spinner("Analyzing Image..."):
+                            res = call_ai("Solve this question in complete detail step-by-step:", image=img)
                             st.session_state.query_count += 1
                             st.write(res)
 
         with tool_tab3:
-            st.subheader("💬 Direct AI Doubt Solver")
-            if st.button("🗑️ Clear Conversation"):
+            st.subheader("💬 Direct AI Assistant")
+            if st.button("🗑️ Clear Chat History"):
                 st.session_state.chat_history = []
                 st.rerun()
 
@@ -444,7 +435,7 @@ else:
                 st.divider()
 
             with st.form("chat_form", clear_on_submit=True):
-                user_q = st.text_input("Ask any doubt...")
+                user_q = st.text_input("Ask any question or concept...")
                 send_btn = st.form_submit_button("Send Question", type="primary")
 
             if send_btn and user_q:
@@ -455,72 +446,74 @@ else:
                     st.rerun()
 
     # ---------------------------------------------------------
-    # PAGE 3: PROFILE & PAYMENT
+    # PAGE: PROFILE & PAYMENT LOGIC
     # ---------------------------------------------------------
-    elif st.session_state.current_page == "👤 Profile & Plan":
-        st.subheader("👤 User Account & Passcode")
+    elif st.session_state.current_page == "Profile":
+        st.subheader("👤 User Profile & Membership")
         
         st.markdown(f"""
-        <div class="profile-card">
-            <h4>Name: {st.session_state.user_data['full_name']}</h4>
+        <div class="card-box">
+            <p><b>Full Name:</b> {st.session_state.user_data['full_name']}</p>
             <p><b>Username:</b> @{username}</p>
             <p><b>Mobile:</b> {st.session_state.user_data['phone'] or 'N/A'}</p>
-            <p><b>Status:</b> {'👑 PRO Plan Active' if is_pro else '🆓 Free Tier'}</p>
-            <p><b>Validity:</b> {days_left if is_pro else 0} Days Left</p>
+            <p><b>Active Plan:</b> {'👑 PRO Tier' if is_pro else '🆓 FREE Tier'}</p>
             <p><b>Passcode Key:</b> <code>{passcode_key if passcode_key else 'None'}</code></p>
         </div>
         """, unsafe_allow_html=True)
 
         st.divider()
         st.subheader("💳 Upgrade To Pro Plan (₹99 / Month)")
-        
-        st.link_button("💳 Pay ₹99 via Razorpay Link", RAZORPAY_PAY_LINK, type="primary")
-        
+        st.link_button("💳 Pay ₹99 via Razorpay", RAZORPAY_PAY_LINK, type="primary")
+
         st.markdown("<br>", unsafe_allow_html=True)
-        with st.form("payment_verify_form"):
-            txn_id_input = st.text_input("Enter 12-Digit UPI / Razorpay Reference ID (or Admin Code):")
-            submit_pay = st.form_submit_button("Verify & Activate Pro Plan")
+        with st.form("payment_form"):
+            txn_id_input = st.text_input("Enter 12-Digit Reference ID / Admin Passcode:")
+            submit_pay = st.form_submit_button("Verify & Activate Pro")
 
         if submit_pay:
             if txn_id_input.strip() == PRO_PASSCODE:
                 exp, pass_k = update_pro_status(username)
-                st.success(f"🎉 Admin Passcode Accepted! Active till {exp}. Key: {pass_k}")
+                st.success(f"🎉 Passcode Verified! Pro active till {exp}")
                 st.rerun()
             else:
                 ok, msg, pass_k = validate_and_process_txn(txn_id_input, username)
                 if ok:
-                    st.success(f"{msg}\n\n🔑 Generated Passcode: **{pass_k}**")
+                    st.success(f"{msg}\n\nKey: **{pass_k}**")
                     st.rerun()
                 else:
                     st.error(msg)
 
+        st.divider()
+        if st.button("🔒 Logout"):
+            st.session_state.is_logged_in = False
+            st.session_state.user_data = None
+            st.rerun()
+
     # ---------------------------------------------------------
-    # PAGE 4: ABOUT APP & DEVELOPER
+    # PAGE: ABOUT SECTION
     # ---------------------------------------------------------
-    elif st.session_state.current_page == "ℹ️ About App & Developer":
+    elif st.session_state.current_page == "About":
         st.subheader("ℹ️ About Student AI & Developer")
         
-        col1, col2 = st.columns([1, 2])
+        about_col1, about_col2 = st.columns([1, 2])
         
-        with col1:
+        with about_col1:
             if os.path.exists("profile.jpg"):
-                st.image("profile.jpg", caption="MG Gangwar (Founder)", width=220)
+                st.image("profile.jpg", caption="MG Gangwar", width=200)
             elif os.path.exists("profile.png"):
-                st.image("profile.png", caption="MG Gangwar (Founder)", width=220)
+                st.image("profile.png", caption="MG Gangwar", width=200)
             else:
-                st.image("https://github.com/identicons/mggangwar.png", caption="MG Gangwar (Founder)", width=220)
+                st.image("https://github.com/identicons/mggangwar.png", caption="MG Gangwar", width=200)
 
-        with col2:
+        with about_col2:
             st.markdown("""
-            ### 👑 App Developed By: **MG Gangwar**
-            **Student AI** ek high-performance, secure academic & cyber-security assistant app hai. Is platform ko students ke exam preparation, notes parsing, aur image solver requirements ko automated aur Fast banane ke liye banaya gaya hai.
+            ### 👑 Created By: **MG Gangwar**
+            **Student AI** ek end-to-end smart learning solution hai jo students ki study, notes parsing, code analysis, aur problem solving ko single dashboard par laata hai.
 
             ---
-            #### 🚀 Key Architecture Highlights:
-            * **Secure SHA-256 Authentication:** Fast and encrypted database logins.
-            * **Automated Billing Logic:** Single-use 12-digit payment reference verification with 30 days lock.
-            * **Smart Multi-Modal Vision Engine:** Detailed handwritten/diagram problem solver.
+            * **Secure Database Logic:** SHA-256 encrypted authentication system.
+            * **Multi-Modal Vision AI:** Handwritten notes aur image queries solving engine.
+            * **Instant Auto Verification:** Razorpay 12-digit transaction locking mechanism.
             
-            **Contact Support:** ggangwar314@gamil.com  
-            **Developer:** MG Gangwar (GM Cyber Solutions)
+            **Developer Contact:** ggangwar314@gmail.com
             """)
