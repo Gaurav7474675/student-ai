@@ -517,3 +517,5 @@ else:
             c_top1, c_top2 = st.columns([4, 1])
             with c_top2:
                 if st.button("🗑️ Clear Chat"):
+                    st.session_state.chat_history = []
+                    st.rerun()
