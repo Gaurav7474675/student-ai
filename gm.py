@@ -526,4 +526,12 @@ else:
         if submit_pay:
             if txn_id_input.strip() == PRO_PASSCODE:
                 exp, pass_k = update_pro_status(username)
-                st.success(f"🎉 Admin Code Accepted! PRO Active till {exp}\n\nP
+                st.success(f"🎉 Admin Code Accepted! PRO Active till {exp}\n\nPasscode Key: {pass_k}")
+                st.rerun()
+            else:
+                ok, msg, pass_k = validate_and_process_txn(txn_id_input, username)
+                if ok:
+                    st.success(f"{msg}\n\n🔑 Generated Passcode Key: **{pass_k}**")
+                    st.rerun()
+                else:
+                    st.error(msg)
