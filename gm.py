@@ -413,7 +413,7 @@ else:
 
         st.divider()
         st.subheader("💳 Upgrade to PRO Plan (₹99)")
-        st.link_button("🚀 Pay ₹99 via Instamojo / UPI", "https://imjo.in/HJVTwE", use_container_width=True)
+        st.link_button("🚀 Pay ₹99 via Instamojo / UPI", "https://razorpay.me/@gaurav1324", use_container_width=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
         with st.form("pay_verify_form"):
