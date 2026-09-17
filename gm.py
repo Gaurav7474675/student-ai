@@ -11,7 +11,7 @@ import secrets
 from datetime import datetime, timedelta
 
 # =========================================================
-# 1. PAGE CONFIG & STYLES (CLEAN & FIXED)
+# 1. PAGE CONFIG & STYLES (RESPONSIVE FIX)
 # =========================================================
 st.set_page_config(
     page_title="Student AI - Pro Platform",
@@ -20,87 +20,41 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Custom CSS for UI + Navbar Hide + Green Button
+# Custom CSS with layout bug fix
 st.markdown("""
     <style>
-    /* Streamlit top header, menu, GitHub link, and footer completely hidden */
+    /* Hide Default Streamlit Chrome */
     #MainMenu, footer, header {visibility: hidden !important;}
     div[data-testid="stHeader"], div[data-testid="stToolbar"], div[data-testid="stDecoration"], div[data-testid="stStatusWidget"] {display: none !important;}
 
-    /* Native App Dark Theme */
+    /* Native Dark Background */
     .stApp {
         background-color: #0A0E17;
         color: #F4F7FB;
-        font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
     }
 
     .block-container {
-        padding-top: 1rem !important;
-        padding-bottom: 95px !important;
-        max-width: 500px !important;
+        padding-top: 1.5rem !important;
+        padding-bottom: 2rem !important;
+        max-width: 700px !important;
     }
 
-    .app-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        background: linear-gradient(135deg, #1E293B, #0F172A);
-        padding: 14px 18px;
-        border-radius: 14px;
-        border: 1px solid #334155;
-        margin-bottom: 18px;
-    }
-
-    /* Fixed Native Bottom Navigation Bar */
-    div[data-testid="stHorizontalBlock"] {
-        position: fixed !important;
-        bottom: 0 !important;
-        left: 0 !important;
-        right: 0 !important;
-        background-color: #1E293B !important;
-        padding: 8px 10px !important;
-        border-top: 1px solid #334155 !important;
-        z-index: 999999 !important;
-        display: flex !important;
-        justify-content: space-around !important;
-        box-shadow: 0px -4px 15px rgba(0,0,0,0.5);
-    }
-
-    div[data-testid="stHorizontalBlock"] > div {
-        flex: 1 !important;
-        margin: 0 2px !important;
-    }
-
-    div[data-testid="stHorizontalBlock"] button {
-        background: transparent !important;
-        border: none !important;
-        color: #94A3B8 !important;
-        font-size: 11px !important;
-        padding: 4px 0px !important;
-        border-radius: 8px !important;
-        height: auto !important;
-    }
-
-    div[data-testid="stHorizontalBlock"] button:hover {
-        color: #22C55E !important;
-        background: #0F172A !important;
-    }
-
-    /* Custom Green Process Button */
-    div.stButton > button[kind="primary"] {
-        background-color: #22C55E !important;
-        color: white !important;
-        border-radius: 10px !important;
-        border: none !important;
-        font-weight: bold !important;
-    }
-
+    /* Clean Card UI */
     .card-box {
         background: #1E293B;
         padding: 18px;
-        border-radius: 14px;
+        border-radius: 12px;
         border: 1px solid #334155;
         margin-bottom: 15px;
+    }
+
+    /* Green Process Button Customization */
+    div.stButton > button[kind="primary"] {
+        background-color: #22C55E !important;
+        color: white !important;
+        border-radius: 8px !important;
+        border: none !important;
+        font-weight: bold !important;
     }
 
     .passcode-badge {
@@ -234,20 +188,16 @@ def validate_and_process_txn(txn_id, username):
     return True, f"🎉 Pro Plan Activated till {expiry}!", pass_key
 
 # =========================================================
-# 3. SESSION STATE ENGINE (NO EXTRA COOKIE MANAGER WRAPPER)
+# 3. SESSION STATE ENGINE
 # =========================================================
 if "is_logged_in" not in st.session_state:
     st.session_state.is_logged_in = False
 if "user_data" not in st.session_state:
     st.session_state.user_data = None
-if "current_page" not in st.session_state:
-    st.session_state.current_page = "Dashboard"
+if "current_tab" not in st.session_state:
+    st.session_state.current_tab = "Home"
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
-
-def navigate_to(page_name):
-    st.session_state.current_page = page_name
-    st.rerun()
 
 # =========================================================
 # 4. AI BACKEND PIPELINE
@@ -301,7 +251,7 @@ if not st.session_state.is_logged_in:
         with st.form(key="login_form"):
             login_user = st.text_input("👤 Username", key="l_u")
             login_pass = st.text_input("🔑 Password", type="password", key="l_p")
-            submit_login = st.form_submit_button("🚀 Login", type="primary")
+            submit_login = st.form_submit_button("🚀 Login", type="primary", use_container_width=True)
 
         if submit_login:
             if login_user and login_pass:
@@ -327,7 +277,7 @@ if not st.session_state.is_logged_in:
             reg_phone = st.text_input("Mobile Number", key="r_p")
             reg_user = st.text_input("Choose Username", key="r_u")
             reg_pass = st.text_input("Choose Password", type="password", key="r_pass")
-            submit_reg = st.form_submit_button("📝 Register Now", type="primary")
+            submit_reg = st.form_submit_button("📝 Register Now", type="primary", use_container_width=True)
 
         if submit_reg:
             if reg_user and reg_pass and reg_name:
@@ -340,158 +290,145 @@ if not st.session_state.is_logged_in:
                 st.warning("All fields are required.")
 
 # =========================================================
-# 6. MAIN APP INTERFACE & PAGE ROUTING
+# 6. MAIN APP INTERFACE (ROBUST TOP NAVIGATION)
 # =========================================================
 else:
     username = st.session_state.user_data["username"]
     is_pro, expiry_info, days_left, passcode_key = check_user_pro_validity(username)
 
-    # Native App Header Bar
-    st.markdown(f"""
-    <div class="app-header">
-        <div>
-            <h4 style="margin:0; color:#F8FAFC;">Student AI Pro</h4>
-            <span style="font-size:12px; color:#94A3B8;">User: <b>@{username}</b> | Status: <b>{'👑 PRO' if is_pro else '🆓 FREE'}</b></span>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Bottom Navigation
-    c1, c2, c3 = st.columns(3)
-    with c1:
+    # Header Bar
+    st.markdown(f"### 🛡️ Student AI Pro")
+    st.caption(f"Logged in as: **@{username}** | Status: **{'👑 PRO' if is_pro else '🆓 FREE'}**")
+    
+    # Top Navigation Row
+    nav_col1, nav_col2, nav_col3, nav_col4 = st.columns(4)
+    with nav_col1:
         if st.button("🏠 Home", use_container_width=True):
-            navigate_to("Dashboard")
-    with c2:
-        if st.button("🛠️ Tools", use_container_width=True):
-            navigate_to("Tools")
-    with c3:
+            st.session_state.current_tab = "Home"
+            st.rerun()
+    with nav_col2:
+        if st.button("📂 PDF AI", use_container_width=True):
+            st.session_state.current_tab = "PDF"
+            st.rerun()
+    with nav_col3:
+        if st.button("📷 Photo AI", use_container_width=True):
+            st.session_state.current_tab = "Photo"
+            st.rerun()
+    with nav_col4:
         if st.button("👤 Profile", use_container_width=True):
-            navigate_to("Profile")
+            st.session_state.current_tab = "Profile"
+            st.rerun()
 
-    # PAGE 1: DASHBOARD
-    if st.session_state.current_page == "Dashboard":
-        col_m1, col_m2 = st.columns(2)
-        with col_m1:
+    st.divider()
+
+    # --- TAB 1: HOME DASHBOARD ---
+    if st.session_state.current_tab == "Home":
+        m1, m2 = st.columns(2)
+        with m1:
             st.markdown(f'<div class="card-box" style="text-align:center;"><h4>Plan</h4><h3>{"PRO 👑" if is_pro else "FREE 🆓"}</h3></div>', unsafe_allow_html=True)
-        with col_m2:
-            st.markdown(f'<div class="card-box" style="text-align:center;"><h4>Pro Validity</h4><h3>{days_left if is_pro else 0} Days</h3></div>', unsafe_allow_html=True)
+        with m2:
+            st.markdown(f'<div class="card-box" style="text-align:center;"><h4>Validity</h4><h3>{days_left if is_pro else 0} Days</h3></div>', unsafe_allow_html=True)
 
-        st.markdown("### ⚡ Quick Access Modules")
-        
-        st.markdown("""
-        <div class="card-box">
-            <h4>📂 PDF Notes Solver</h4>
-            <p>Upload lecture notes PDF to extract summaries & practice MCQs.</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-        st.markdown("""
-        <div class="card-box">
-            <h4>📷 Photo Problem Solver</h4>
-            <p>Upload handwritten exam questions or math problems for instant solutions.</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-    # PAGE 2: TOOLS
-    elif st.session_state.current_page == "Tools":
-        tool_tab1, tool_tab2, tool_tab3 = st.tabs(["📂 PDF Solver", "📷 Photo Solver", "💬 AI Chat"])
-
-        with tool_tab1:
-            st.subheader("📂 Upload Notes / Book PDF")
-            pdf_file = st.file_uploader("Choose PDF File:", type=["pdf"])
-            feature = st.radio("Generate Output:", ["Quick Revision Notes", "Important Exam Questions", "Practice Quiz (MCQs)", "Code Analysis"], horizontal=True)
-
-            if st.button("🚀 Process PDF", type="primary", use_container_width=True):
-                if pdf_file:
-                    reader = PdfReader(io.BytesIO(pdf_file.getvalue()))
-                    page_count = len(reader.pages)
-                    
-                    if page_count > 3 and not is_pro:
-                        st.error(f"🔒 Free tier sirf 3 pages allow karta hai! App me {page_count} pages hain.")
-                        st.info("Badi PDFs process karne ke liye Profile me jaakar PRO Plan unlock karein.")
-                    else:
-                        with st.spinner("Analyzing PDF..."):
-                            max_p = min(page_count, 3) if not is_pro else page_count
-                            text = "".join([p.extract_text() or "" for p in reader.pages[:max_p]])
-                            res = call_ai(f"Generate {feature} for:\n\n{text[:80000]}")
-                            st.markdown("### Output Result:")
-                            st.write(res)
-                else:
-                    st.warning("Please upload a PDF file.")
-
-        with tool_tab2:
-            st.subheader("📷 Photo / Homework Question Solver")
-            if not is_pro:
-                st.error("🔒 Photo Solver is locked! Requires PRO Membership.")
-                if st.button("Unlock PRO Plan"):
-                    navigate_to("Profile")
-            else:
-                img_file = st.file_uploader("Upload Image:", type=["jpg", "png", "jpeg"])
-                if img_file:
-                    img = Image.open(img_file)
-                    st.image(img, width=280)
-                    if st.button("⚡ Solve Step-By-Step", type="primary", use_container_width=True):
-                        with st.spinner("Analyzing Image..."):
-                            res = call_ai("Solve this problem image with step-by-step logic:", image=img)
-                            st.write(res)
-
-        with tool_tab3:
-            st.subheader("💬 AI Assistant Chat")
-            if st.button("🗑️ Clear Chat History"):
-                st.session_state.chat_history = []
+        st.markdown("### ⚡ Quick Modules")
+        col_btn1, col_btn2 = st.columns(2)
+        with col_btn1:
+            if st.button("📂 Open PDF Solver", use_container_width=True):
+                st.session_state.current_tab = "PDF"
+                st.rerun()
+        with col_btn2:
+            if st.button("📷 Open Photo Solver", use_container_width=True):
+                st.session_state.current_tab = "Photo"
                 st.rerun()
 
-            for q, a in st.session_state.chat_history:
-                st.markdown(f"**❓ Question:** {q}")
-                st.markdown(f"**🤖 Answer:** {a}")
-                st.divider()
+        st.divider()
+        st.markdown("### 💬 Direct Ask Question")
+        with st.form("home_chat_form", clear_on_submit=True):
+            user_q = st.text_input("Type your doubt here:")
+            send_btn = st.form_submit_button("Ask AI", type="primary", use_container_width=True)
 
-            with st.form("chat_form_module", clear_on_submit=True):
-                user_q = st.text_input("Ask any doubt...")
-                send_btn = st.form_submit_button("Send Query", type="primary")
+        if send_btn and user_q:
+            with st.spinner("Generating answer..."):
+                ans = call_ai(user_q)
+                st.markdown("### 💡 AI Response:")
+                st.write(ans)
 
-            if send_btn and user_q:
-                with st.spinner("Generating..."):
-                    ans = call_ai(user_q)
-                    st.session_state.chat_history.append((user_q, ans))
-                    st.rerun()
+    # --- TAB 2: PDF SOLVER ---
+    elif st.session_state.current_tab == "PDF":
+        st.subheader("📂 PDF Notes & Exam Solver")
+        pdf_file = st.file_uploader("Upload College Notes PDF:", type=["pdf"])
+        feature = st.radio("Select Output:", ["⚡ Quick Revision Notes", "🎯 Important Exam Questions", "🧪 Practice Quiz (MCQs)", "🛡️ Code Analysis"], horizontal=True)
 
-    # PAGE 3: PROFILE
-    elif st.session_state.current_page == "Profile":
-        st.subheader("👤 Account Profile & Passcode Key")
-        passcode_display = passcode_key if passcode_key else "PRO Not Active"
+        if st.button("🚀 Process PDF", type="primary", use_container_width=True):
+            if pdf_file:
+                reader = PdfReader(io.BytesIO(pdf_file.getvalue()))
+                page_count = len(reader.pages)
+                
+                if page_count > 3 and not is_pro:
+                    st.error(f"🔒 Free tier allows max 3 pages! Your PDF has {page_count} pages.")
+                    st.info("Upgrade to Pro in Profile tab for unlimited PDF pages.")
+                else:
+                    with st.spinner("Analyzing PDF content..."):
+                        max_p = min(page_count, 3) if not is_pro else page_count
+                        text = "".join([p.extract_text() or "" for p in reader.pages[:max_p]])
+                        res = call_ai(f"Generate {feature} for:\n\n{text[:80000]}")
+                        st.markdown("### 📋 Result:")
+                        st.write(res)
+            else:
+                st.warning("Pehle PDF file upload karein.")
+
+    # --- TAB 3: PHOTO SOLVER ---
+    elif st.session_state.current_tab == "Photo":
+        st.subheader("📷 Photo / Problem Solver")
+        if not is_pro:
+            st.error("🔒 Photo Solver is a PRO Feature!")
+            if st.button("Upgrade to PRO Now", use_container_width=True):
+                st.session_state.current_tab = "Profile"
+                st.rerun()
+        else:
+            img_file = st.file_uploader("Upload Question Image:", type=["jpg", "png", "jpeg"])
+            if img_file:
+                img = Image.open(img_file)
+                st.image(img, width=300)
+                if st.button("⚡ Solve Question", type="primary", use_container_width=True):
+                    with st.spinner("Solving image..."):
+                        res = call_ai("Solve this problem image with step-by-step logic:", image=img)
+                        st.markdown("### 💡 Solution:")
+                        st.write(res)
+
+    # --- TAB 4: PROFILE & PAYMENT ---
+    elif st.session_state.current_tab == "Profile":
+        st.subheader("👤 User Profile & Access Key")
+        passcode_display = passcode_key if passcode_key else "PRO Inactive"
         
         st.markdown(f"""
         <div class="card-box">
             <h4>Name: {st.session_state.user_data['full_name']}</h4>
             <p><b>Username:</b> @{username}</p>
-            <p><b>Mobile:</b> {st.session_state.user_data['phone'] or 'N/A'}</p>
             <p><b>Status:</b> {'👑 PRO Tier' if is_pro else '🆓 Free Tier'}</p>
-            <p><b>Days Left:</b> {days_left if is_pro else 0} Days</p>
-            <p><b>Your Passcode Key:</b></p>
+            <p><b>Remaining Days:</b> {days_left if is_pro else 0} Days</p>
+            <p><b>Passcode Key:</b></p>
             <div class="passcode-badge">{passcode_display}</div>
         </div>
         """, unsafe_allow_html=True)
 
         st.divider()
-        st.subheader("💳 Upgrade To Pro Plan (Fixed ₹99 / Month)")
-        
-        st.link_button("💳 Pay ₹99 via Instamojo / UPI", "https://imjo.in/HJVTwE", use_container_width=True)
+        st.subheader("💳 Upgrade to PRO Plan (₹99)")
+        st.link_button("🚀 Pay ₹99 via Instamojo / UPI", "https://imjo.in/HJVTwE", use_container_width=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
-        with st.form("pay_verify_module"):
-            txn_id_input = st.text_input("Enter 12-Digit Ref ID (or Admin Code):")
-            submit_pay = st.form_submit_button("Verify Payment & Generate Passcode Key")
+        with st.form("pay_verify_form"):
+            txn_id_input = st.text_input("Enter 12-Digit Payment Ref ID (or Admin Passcode):")
+            submit_pay = st.form_submit_button("Verify & Activate Pro", use_container_width=True)
 
         if submit_pay:
             if txn_id_input.strip() == PRO_PASSCODE:
                 exp, pass_k = update_pro_status(username)
-                st.success(f"🎉 Admin Code Accepted! PRO Active till {exp}\n\nPasscode Key: {pass_k}")
+                st.success(f"🎉 Admin Passcode Accepted! PRO Active till {exp}\n\nPasscode Key: {pass_k}")
                 st.rerun()
             else:
                 ok, msg, pass_k = validate_and_process_txn(txn_id_input, username)
                 if ok:
-                    st.success(f"{msg}\n\n🔑 Generated Passcode Key: **{pass_k}**")
+                    st.success(f"{msg}\n\n🔑 Passcode Key: **{pass_k}**")
                     st.rerun()
                 else:
                     st.error(msg)
