@@ -412,8 +412,8 @@ else:
         """, unsafe_allow_html=True)
 
         st.divider()
-        st.subheader("💳 Upgrade to PRO Plan (₹99)")
-        st.link_button("🚀 Pay ₹99 via Instamojo / UPI", "https://razorpay.me/@gaurav1324", use_container_width=True)
+        st.subheader("💳 Upgrade to PRO Plan (₹79)")
+        st.link_button("🚀 Pay ₹79 via Instamojo / UPI", "https://rzp.io/rzp/R3sR8rWg", use_container_width=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
         with st.form("pay_verify_form"):
