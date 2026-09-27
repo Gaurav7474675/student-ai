@@ -22,7 +22,7 @@ st.set_page_config(
 
 st.markdown("""
     <style>
-    /* CSS Reset */
+    /* Reset Unwanted Streamlit Elements */
     #MainMenu, footer, header {visibility: hidden !important;}
     div[data-testid="stHeader"], div[data-testid="stToolbar"], div[data-testid="stDecoration"], div[data-testid="stStatusWidget"] {display: none !important;}
 
@@ -41,41 +41,35 @@ st.markdown("""
     }
 
     .block-container {
-        padding-top: 0.8rem !important;
+        padding-top: 0.5rem !important;
         padding-bottom: 7rem !important;
         max-width: 820px !important;
     }
 
-    /* Dynamic Header Title Styling */
-    .app-title {
-        font-size: 20px;
+    /* Top Bar ChatGPT Style Alignment */
+    .top-bar-custom {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding-bottom: 10px;
+        border-bottom: 1px solid #1F1F1F;
+        margin-bottom: 15px;
+    }
+
+    .app-title-text {
+        font-size: 19px;
         font-weight: 700;
         color: #FFFFFF;
-        display: flex;
-        align-items: center;
-        gap: 8px;
     }
 
-    .pro-tag {
+    .pro-badge {
         background: linear-gradient(135deg, #FFD700 0%, #FF8C00 100%);
-        color: #000;
-        font-size: 11px;
+        color: #000000;
+        font-size: 10px;
         font-weight: 800;
-        padding: 2px 8px;
-        border-radius: 6px;
+        padding: 2px 6px;
+        border-radius: 4px;
         margin-left: 6px;
-        letter-spacing: 0.5px;
-    }
-
-    .pro-offer-btn {
-        background-color: #1E1E1E;
-        color: #38BDF8;
-        padding: 6px 14px;
-        border-radius: 20px;
-        font-size: 13px;
-        font-weight: 600;
-        text-decoration: none;
-        border: 1px solid #2B2B2B;
     }
 
     /* Chat Bubbles */
@@ -103,7 +97,7 @@ st.markdown("""
         line-height: 1.6;
     }
 
-    /* Chat Input Styling */
+    /* Input Box */
     .stChatInputContainer {
         padding-bottom: 15px !important;
     }
@@ -179,7 +173,7 @@ def register_user(username, password, email):
                   (username, hashed_p, email))
         conn.commit()
         conn.close()
-        return True, "Account Successfully Created! Please Login."
+        return True, "Account Created! Please Login."
     except sqlite3.IntegrityError:
         conn.close()
         return False, "Username Already Exists!"
@@ -245,7 +239,7 @@ def validate_and_process_txn(txn_id, username):
     conn.close()
     
     expiry, pass_key = update_pro_status(username, days=30)
-    return True, f"🎉 Pro Plan Activated Till {expiry}!", pass_key
+    return True, f"🎉 Pro Plan Active Till {expiry}!", pass_key
 
 # =========================================================
 # 3. SESSION MANAGEMENT
@@ -255,6 +249,9 @@ if "messages" not in st.session_state:
 
 if "active_page" not in st.session_state:
     st.session_state.active_page = "chat"
+
+if "show_sidebar" not in st.session_state:
+    st.session_state.show_sidebar = False
 
 query_params = st.query_params
 persisted_user = query_params.get("session_user", None)
@@ -308,7 +305,7 @@ def call_ai(prompt, image=None):
         return f"Network Error: {str(e)}"
 
 # =========================================================
-# 5. AUTHENTICATION SCREEN
+# 5. AUTHENTICATION MODULE
 # =========================================================
 if not st.session_state.get("is_logged_in", False):
     col_l1, col_l2, col_l3 = st.columns([1, 2, 1])
@@ -357,11 +354,9 @@ if not st.session_state.get("is_logged_in", False):
 else:
     username = st.session_state.user_data["username"]
     is_pro, expiry_info, days_left, passcode_key = check_user_pro_validity(username)
-
-    # Dynamic Name Variable Logic
     app_display_name = "Student AI Pro" if is_pro else "Student AI"
 
-    # --- SIDEBAR DRAWER NAVIGATION MENU ---
+    # --- SIDEBAR DRAWER NAVIGATION ---
     with st.sidebar:
         st.markdown(f"### 🛡️ {app_display_name}")
         st.caption(f"Logged as **@{username}** ({'👑 PRO' if is_pro else '🆓 Free Plan'})")
@@ -381,7 +376,6 @@ else:
 
         st.divider()
 
-        # Pro Plan Activation Box
         with st.expander("💳 Upgrade / Activate Pro"):
             if is_pro:
                 st.success(f"PRO Active! Days Left: {days_left}")
@@ -410,23 +404,41 @@ else:
             st.query_params.clear()
             st.rerun()
 
-    # --- TOP APP HEADER BAR ---
-    col_h1, col_h2 = st.columns([3, 1])
-    with col_h1:
-        pro_badge_html = '<span class="pro-tag">PRO</span>' if is_pro else ''
-        st.markdown(f"""
-        <div class="app-title">
-            <span>🛡️ {app_display_name}</span> {pro_badge_html}
-        </div>
-        """, unsafe_allow_html=True)
-        
-    with col_h2:
-        if not is_pro:
-            st.markdown(f"""
-            <div style="text-align: right;">
-                <a href="{RAZORPAY_PAY_LINK}" target="_blank" class="pro-offer-btn">🎁 Free Offer / Upgrade Pro</a>
-            </div>
-            """, unsafe_allow_html=True)
+    # =========================================================
+    # EXACT CHATGPT STYLE TOP HEADER BAR
+    # =========================================================
+    h_col1, h_col2, h_col3 = st.columns([1, 4, 1])
+
+    # Left: Hamburger Menu Icon (To Toggle Drawer)
+    with h_col1:
+        with st.popover("☰ Menu"):
+            st.markdown("### Navigation Drawer")
+            if st.button("💬 Chat Interface", key="pop_chat", use_container_width=True):
+                st.session_state.active_page = "chat"
+                st.rerun()
+            if st.button("📱 About & Plans", key="pop_about", use_container_width=True):
+                st.session_state.active_page = "about"
+                st.rerun()
+            if st.button("👨‍💻 Developer Profile", key="pop_dev", use_container_width=True):
+                st.session_state.active_page = "developer"
+                st.rerun()
+
+    # Center: App Title
+    with h_col2:
+        pro_tag = '<span class="pro-badge">PRO</span>' if is_pro else ''
+        st.markdown(f"<div style='text-align:center;'><span class='app-title-text'>🛡️ {app_display_name}</span>{pro_tag}</div>", unsafe_allow_html=True)
+
+    # Right: ChatGPT Three Dots Options Menu
+    with h_col3:
+        with st.popover("⋮ More"):
+            st.markdown(f"**User:** @{username}")
+            st.caption(f"Status: {'👑 PRO Active' if is_pro else '🆓 Free Plan'}")
+            st.divider()
+            if not is_pro:
+                st.link_button("🎁 Offer / Upgrade Pro", RAZORPAY_PAY_LINK, use_container_width=True)
+            if st.button("👨‍💻 Developer Profile", key="top_dev_btn", use_container_width=True):
+                st.session_state.active_page = "developer"
+                st.rerun()
 
     st.divider()
 
@@ -436,7 +448,7 @@ else:
     if st.session_state.active_page == "chat":
         
         if not st.session_state.messages:
-            st.markdown(f"<h3 style='text-align: center; margin-top: 30px;'>Hi {username}! 👋</h3>", unsafe_allow_html=True)
+            st.markdown(f"<h3 style='text-align: center; margin-top: 20px;'>Hi {username}! 👋</h3>", unsafe_allow_html=True)
             st.markdown("<p style='text-align: center; color: #8E8E93;'>Apne Doubts, PDF Notes, ya Exam Questions upload karke solution paayein!</p>", unsafe_allow_html=True)
 
         for msg in st.session_state.messages:
@@ -447,7 +459,7 @@ else:
 
         st.markdown("<div style='clear: both;'></div>", unsafe_allow_html=True)
 
-        # PDF & Photo Attachment
+        # PDF & Photo Attachment Button
         with st.popover("📎 Attach PDF Notes / Photo Problem"):
             st.markdown("### Attach Document / Image")
             attach_type = st.radio("Choose Mode:", ["PDF Exam Solver", "Photo Problem Solver"])
@@ -461,7 +473,7 @@ else:
                     page_count = len(reader.pages)
                     
                     if page_count > 3 and not is_pro:
-                        st.error("🔒 Free version me maximum 3 pages allowed hain! Pro version me upgrade karein unlimited pages ke liye.")
+                        st.error("🔒 Free version me maximum 3 pages allowed hain! Upgrade to Pro for unlimited pages.")
                     else:
                         max_pages = page_count if is_pro else min(page_count, 3)
                         extracted_text = "".join([p.extract_text() or "" for p in reader.pages[:max_pages]])
