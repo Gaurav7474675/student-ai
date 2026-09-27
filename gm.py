@@ -11,59 +11,94 @@ import secrets
 from datetime import datetime, timedelta
 
 # =========================================================
-# 1. PAGE CONFIG & STYLES (RESPONSIVE FIX)
+# 1. PAGE CONFIG & CHATGPT NATIVE STYLES
 # =========================================================
 st.set_page_config(
-    page_title="Student AI - Pro Platform",
+    page_title="Student AI - ChatGPT Edition",
     page_icon="🛡️",
-    layout="centered",
-    initial_sidebar_state="collapsed"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-# Custom CSS with layout bug fix
 st.markdown("""
     <style>
-    /* Hide Default Streamlit Chrome */
+    /* Hide Default Streamlit Chrome Header & Footer */
     #MainMenu, footer, header {visibility: hidden !important;}
     div[data-testid="stHeader"], div[data-testid="stToolbar"], div[data-testid="stDecoration"], div[data-testid="stStatusWidget"] {display: none !important;}
 
-    /* Native Dark Background */
+    /* Native Dark Background - ChatGPT UI */
     .stApp {
-        background-color: #0A0E17;
-        color: #F4F7FB;
+        background-color: #212121 !important;
+        color: #ECECF1 !important;
+    }
+
+    /* Left Sidebar Styling */
+    section[data-testid="stSidebar"] {
+        background-color: #171717 !important;
+        border-right: 1px solid #2F2F2F !important;
     }
 
     .block-container {
-        padding-top: 1.5rem !important;
-        padding-bottom: 2rem !important;
-        max-width: 700px !important;
+        padding-top: 1rem !important;
+        padding-bottom: 6rem !important;
+        max-width: 800px !important;
     }
 
-    /* Clean Card UI */
-    .card-box {
-        background: #1E293B;
-        padding: 18px;
-        border-radius: 12px;
-        border: 1px solid #334155;
-        margin-bottom: 15px;
+    /* ChatGPT Style Chat Bubbles */
+    .chat-user {
+        background-color: #2F2F2F;
+        color: #F8FAFC;
+        padding: 12px 18px;
+        border-radius: 18px 18px 2px 18px;
+        margin-bottom: 12px;
+        margin-left: 20%;
+        width: fit-content;
+        max-width: 80%;
+        float: right;
+        clear: both;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.2);
     }
 
-    /* Green Process Button Customization */
+    .chat-ai {
+        background-color: #171717;
+        color: #ECECF1;
+        padding: 14px 20px;
+        border-radius: 18px 18px 18px 2px;
+        margin-bottom: 12px;
+        margin-right: 15%;
+        width: fit-content;
+        max-width: 85%;
+        float: left;
+        clear: both;
+        border: 1px solid #2F2F2F;
+    }
+
+    /* Input & Button Styling */
+    .stTextInput > div > div > input {
+        background-color: #2F2F2F !important;
+        color: #FFFFFF !important;
+        border: 1px solid #424242 !important;
+        border-radius: 12px !important;
+    }
+
     div.stButton > button[kind="primary"] {
-        background-color: #22C55E !important;
+        background-color: #10A37F !important;
         color: white !important;
-        border-radius: 8px !important;
         border: none !important;
-        font-weight: bold !important;
+        font-weight: 600 !important;
+    }
+
+    div.stButton > button[kind="primary"]:hover {
+        background-color: #1A7F64 !important;
     }
 
     .passcode-badge {
         background: #064E3B;
         color: #34D399;
-        padding: 8px 14px;
-        border-radius: 8px;
+        padding: 6px 12px;
+        border-radius: 6px;
         font-family: monospace;
-        font-size: 15px;
+        font-size: 14px;
         font-weight: bold;
         display: inline-block;
         border: 1px solid #059669;
@@ -72,10 +107,11 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =========================================================
-# 2. CONFIGURATIONS & SECURE DATABASE ENGINE
+# 2. CONFIGURATIONS & DATABASE ENGINE (EMAIL BASED & 1-MONTH VALIDITY)
 # =========================================================
 api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
 PRO_PASSCODE = st.secrets.get("PRO_PASSCODE") or os.environ.get("PRO_PASSCODE") or "GMCYBER2026"
+RAZORPAY_PAY_LINK = "https://rzp.io/rzp/R3sR8rWg"
 
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
@@ -90,8 +126,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS users (
             username TEXT PRIMARY KEY,
             password TEXT,
-            full_name TEXT,
-            phone TEXT,
+            email TEXT,
             is_pro INTEGER DEFAULT 0,
             pro_expiry TEXT,
             passcode TEXT
@@ -110,13 +145,13 @@ def init_db():
 
 init_db()
 
-def register_user(username, password, full_name, phone):
+def register_user(username, password, email):
     conn = sqlite3.connect("users_database.db")
     c = conn.cursor()
     hashed_p = hash_password(password)
     try:
-        c.execute("INSERT INTO users (username, password, full_name, phone, is_pro) VALUES (?, ?, ?, ?, 0)",
-                  (username, hashed_p, full_name, phone))
+        c.execute("INSERT INTO users (username, password, email, is_pro) VALUES (?, ?, ?, 0)",
+                  (username, hashed_p, email))
         conn.commit()
         conn.close()
         return True, "Account ban gaya! Login karein."
@@ -128,7 +163,7 @@ def validate_login(username, password):
     conn = sqlite3.connect("users_database.db")
     c = conn.cursor()
     hashed_p = hash_password(password)
-    c.execute("SELECT username, full_name, phone, is_pro, pro_expiry, passcode FROM users WHERE username=? AND password=?", (username, hashed_p))
+    c.execute("SELECT username, email, is_pro, pro_expiry, passcode FROM users WHERE username=? AND password=?", (username, hashed_p))
     user = c.fetchone()
     conn.close()
     return user
@@ -194,10 +229,8 @@ if "is_logged_in" not in st.session_state:
     st.session_state.is_logged_in = False
 if "user_data" not in st.session_state:
     st.session_state.user_data = None
-if "current_tab" not in st.session_state:
-    st.session_state.current_tab = "Home"
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
 # =========================================================
 # 4. AI BACKEND PIPELINE
@@ -237,7 +270,7 @@ def call_ai(prompt, image=None):
         return f"Network Error: {str(e)}"
 
 # =========================================================
-# 5. AUTHENTICATION SCREEN
+# 5. AUTHENTICATION SCREEN (ONLY EMAIL, USERNAME & PASSWORD)
 # =========================================================
 if not st.session_state.is_logged_in:
     st.markdown("<h2 style='text-align:center;'>🛡️ STUDENT AI</h2>", unsafe_allow_html=True)
@@ -260,8 +293,7 @@ if not st.session_state.is_logged_in:
                     st.session_state.is_logged_in = True
                     st.session_state.user_data = {
                         "username": user[0],
-                        "full_name": user[1],
-                        "phone": user[2]
+                        "email": user[1]
                     }
                     st.success("Login Successful!")
                     st.rerun()
@@ -273,15 +305,14 @@ if not st.session_state.is_logged_in:
     with auth_tab2:
         st.subheader("Create New Account")
         with st.form(key="reg_form"):
-            reg_name = st.text_input("Full Name", key="r_n")
-            reg_phone = st.text_input("Mobile Number", key="r_p")
+            reg_email = st.text_input("📧 Gmail / Email ID", key="r_e")
             reg_user = st.text_input("Choose Username", key="r_u")
             reg_pass = st.text_input("Choose Password", type="password", key="r_pass")
             submit_reg = st.form_submit_button("📝 Register Now", type="primary", use_container_width=True)
 
         if submit_reg:
-            if reg_user and reg_pass and reg_name:
-                success, msg = register_user(reg_user.strip(), reg_pass.strip(), reg_name.strip(), reg_phone.strip())
+            if reg_user and reg_pass and reg_email:
+                success, msg = register_user(reg_user.strip(), reg_pass.strip(), reg_email.strip())
                 if success:
                     st.success(msg)
                 else:
@@ -290,145 +321,135 @@ if not st.session_state.is_logged_in:
                 st.warning("All fields are required.")
 
 # =========================================================
-# 6. MAIN APP INTERFACE (ROBUST TOP NAVIGATION)
+# 6. MAIN CHATGPT-STYLE APP INTERFACE
 # =========================================================
 else:
     username = st.session_state.user_data["username"]
     is_pro, expiry_info, days_left, passcode_key = check_user_pro_validity(username)
 
-    # Header Bar
-    st.markdown(f"### 🛡️ Student AI Pro")
-    st.caption(f"Logged in as: **@{username}** | Status: **{'👑 PRO' if is_pro else '🆓 FREE'}**")
-    
-    # Top Navigation Row
-    nav_col1, nav_col2, nav_col3, nav_col4 = st.columns(4)
-    with nav_col1:
-        if st.button("🏠 Home", use_container_width=True):
-            st.session_state.current_tab = "Home"
+    # --- CHATGPT SIDEBAR ---
+    with st.sidebar:
+        st.markdown("### 🤖 ChatGPT AI")
+        if st.button("➕ Nayi Chat", use_container_width=True):
+            st.session_state.messages = []
             st.rerun()
-    with nav_col2:
-        if st.button("📂 PDF AI", use_container_width=True):
-            st.session_state.current_tab = "PDF"
-            st.rerun()
-    with nav_col3:
-        if st.button("📷 Photo AI", use_container_width=True):
-            st.session_state.current_tab = "Photo"
-            st.rerun()
-    with nav_col4:
-        if st.button("👤 Profile", use_container_width=True):
-            st.session_state.current_tab = "Profile"
-            st.rerun()
-
-    st.divider()
-
-    # --- TAB 1: HOME DASHBOARD ---
-    if st.session_state.current_tab == "Home":
-        m1, m2 = st.columns(2)
-        with m1:
-            st.markdown(f'<div class="card-box" style="text-align:center;"><h4>Plan</h4><h3>{"PRO 👑" if is_pro else "FREE 🆓"}</h3></div>', unsafe_allow_html=True)
-        with m2:
-            st.markdown(f'<div class="card-box" style="text-align:center;"><h4>Validity</h4><h3>{days_left if is_pro else 0} Days</h3></div>', unsafe_allow_html=True)
-
-        st.markdown("### ⚡ Quick Modules")
-        col_btn1, col_btn2 = st.columns(2)
-        with col_btn1:
-            if st.button("📂 Open PDF Solver", use_container_width=True):
-                st.session_state.current_tab = "PDF"
-                st.rerun()
-        with col_btn2:
-            if st.button("📷 Open Photo Solver", use_container_width=True):
-                st.session_state.current_tab = "Photo"
-                st.rerun()
+            
+        st.divider()
+        st.markdown("**Haliya (Recent)**")
+        st.caption("• Academic Doubts")
+        st.caption("• PDF Exam Notes")
+        st.caption("• Photo Solver")
 
         st.divider()
-        st.markdown("### 💬 Direct Ask Question")
-        with st.form("home_chat_form", clear_on_submit=True):
-            user_q = st.text_input("Type your doubt here:")
-            send_btn = st.form_submit_button("Ask AI", type="primary", use_container_width=True)
+        st.markdown(f"**👤 @{username}**")
+        st.caption(f"Email: {st.session_state.user_data['email']}")
+        st.caption(f"Status: {'👑 PRO' if is_pro else '🆓 Free'}")
 
-        if send_btn and user_q:
-            with st.spinner("Generating answer..."):
-                ans = call_ai(user_q)
-                st.markdown("### 💡 AI Response:")
-                st.write(ans)
+        # Account & Payment Section inside Sidebar Expander
+        with st.expander("👤 Account & Plan Settings"):
+            passcode_display = passcode_key if passcode_key else "PRO Inactive"
+            st.write(f"**Plan:** {'👑 PRO' if is_pro else '🆓 Free Tier'}")
+            st.write(f"**Remaining Days:** {days_left if is_pro else 0}")
+            st.write(f"**Passcode Key:**")
+            st.markdown(f'<div class="passcode-badge">{passcode_display}</div>', unsafe_allow_html=True)
+            
+            st.markdown("---")
+            st.write("**Upgrade to PRO Plan (₹79)**")
+            st.link_button("💳 Pay ₹79 via Razorpay", RAZORPAY_PAY_LINK, use_container_width=True)
+            
+            txn_id_input = st.text_input("Enter 12-Digit Ref ID / Passcode:", key="side_txn")
+            if st.button("Verify & Activate", key="side_pay_btn", type="primary", use_container_width=True):
+                if txn_id_input.strip() == PRO_PASSCODE:
+                    exp, pass_k = update_pro_status(username)
+                    st.success(f"🎉 Admin Passcode Accepted! Active till {exp}")
+                    st.rerun()
+                else:
+                    ok, msg, pass_k = validate_and_process_txn(txn_id_input, username)
+                    if ok:
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
 
-    # --- TAB 2: PDF SOLVER ---
-    elif st.session_state.current_tab == "PDF":
-        st.subheader("📂 PDF Notes & Exam Solver")
-        pdf_file = st.file_uploader("Upload College Notes PDF:", type=["pdf"])
-        feature = st.radio("Select Output:", ["⚡ Quick Revision Notes", "🎯 Important Exam Questions", "🧪 Practice Quiz (MCQs)", "🛡️ Code Analysis"], horizontal=True)
+        if st.button("🚪 Logout", use_container_width=True):
+            st.session_state.is_logged_in = False
+            st.session_state.user_data = None
+            st.rerun()
 
-        if st.button("🚀 Process PDF", type="primary", use_container_width=True):
-            if pdf_file:
-                reader = PdfReader(io.BytesIO(pdf_file.getvalue()))
+    # --- MAIN TOP HEADER ---
+    st.markdown("### 🤖 Student AI Pro")
+    st.caption("ChatGPT Powered Exam & Learning Assistant")
+    st.divider()
+
+    # Welcome Message for New Chat
+    if not st.session_state.messages:
+        st.markdown(f"<h2 style='text-align: center;'>Welcome @{username}! 👋</h2>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #9B9B9B;'>Kya bana rahe ho aaj? Padhai ya Doubt Solver start karein! 🔥</p>", unsafe_allow_html=True)
+
+    # Render Active Chat
+    for msg in st.session_state.messages:
+        if msg["role"] == "user":
+            st.markdown(f'<div class="chat-user">{msg["content"]}</div>', unsafe_allow_html=True)
+        else:
+            st.markdown(f'<div class="chat-ai">🤖 <b>Student AI</b><br><br>{msg["content"]}</div>', unsafe_allow_html=True)
+
+    st.markdown("<div style='clear: both;'></div>", unsafe_allow_html=True)
+
+    # --- CHATGPT INPUT DOCK + PDF/PHOTO TOOLS ---
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    
+    with st.popover("➕ PDF / Photo Tools Attach Karein"):
+        st.markdown("### 📎 Attach Document / Photo")
+        attach_type = st.radio("Select Tool:", ["Text Question Only", "📂 PDF Exam Solver", "📷 Photo Problem Solver"])
+        
+        uploaded_pdf = None
+        uploaded_img = None
+        pdf_feature = "⚡ Quick Revision Notes"
+
+        if attach_type == "📂 PDF Exam Solver":
+            uploaded_pdf = st.file_uploader("Upload PDF College Notes:", type=["pdf"])
+            pdf_feature = st.radio("Output Option Select Karein:", ["⚡ Quick Revision Notes", "🎯 Important Exam Questions", "🧪 Practice Quiz (MCQs)", "🛡️ Code Analysis"])
+        elif attach_type == "📷 Photo Problem Solver":
+            if not is_pro:
+                st.error("🔒 Photo Solver is a PRO Feature! Sidebar se Upgrade Karein.")
+            else:
+                uploaded_img = st.file_uploader("Upload Question Image:", type=["jpg", "png", "jpeg"])
+
+    # Continuous Bottom Text Bar
+    user_prompt = st.chat_input("Kuch bhi puchein...")
+
+    if user_prompt:
+        st.session_state.messages.append({"role": "user", "content": user_prompt})
+        st.rerun()
+
+    # Process AI Execution
+    if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
+        latest_prompt = st.session_state.messages[-1]["content"]
+
+        with st.spinner("ChatGPT processing..."):
+            ai_response = ""
+
+            # 1. PDF Processing Logic
+            if uploaded_pdf:
+                reader = PdfReader(io.BytesIO(uploaded_pdf.getvalue()))
                 page_count = len(reader.pages)
                 
                 if page_count > 3 and not is_pro:
-                    st.error(f"🔒 Free tier allows max 3 pages! Your PDF has {page_count} pages.")
-                    st.info("Upgrade to Pro in Profile tab for unlimited PDF pages.")
+                    ai_response = f"🔒 Free tier allows max 3 pages! Your PDF has {page_count} pages. Upgrade to PRO for unlimited access."
                 else:
-                    with st.spinner("Analyzing PDF content..."):
-                        max_p = min(page_count, 3) if not is_pro else page_count
-                        text = "".join([p.extract_text() or "" for p in reader.pages[:max_p]])
-                        res = call_ai(f"Generate {feature} for:\n\n{text[:80000]}")
-                        st.markdown("### 📋 Result:")
-                        st.write(res)
+                    max_p = min(page_count, 3) if not is_pro else page_count
+                    extracted_text = "".join([p.extract_text() or "" for p in reader.pages[:max_p]])
+                    full_p = f"{latest_prompt}\n\nTask: Generate {pdf_feature} for:\n{extracted_text[:80000]}"
+                    ai_response = call_ai(full_p)
+
+            # 2. Photo Processing Logic
+            elif uploaded_img and is_pro:
+                img = Image.open(uploaded_img)
+                ai_response = call_ai(f"Solve this step-by-step: {latest_prompt}", image=img)
+
+            # 3. Direct AI Question Logic
             else:
-                st.warning("Pehle PDF file upload karein.")
+                ai_response = call_ai(latest_prompt)
 
-    # --- TAB 3: PHOTO SOLVER ---
-    elif st.session_state.current_tab == "Photo":
-        st.subheader("📷 Photo / Problem Solver")
-        if not is_pro:
-            st.error("🔒 Photo Solver is a PRO Feature!")
-            if st.button("Upgrade to PRO Now", use_container_width=True):
-                st.session_state.current_tab = "Profile"
-                st.rerun()
-        else:
-            img_file = st.file_uploader("Upload Question Image:", type=["jpg", "png", "jpeg"])
-            if img_file:
-                img = Image.open(img_file)
-                st.image(img, width=300)
-                if st.button("⚡ Solve Question", type="primary", use_container_width=True):
-                    with st.spinner("Solving image..."):
-                        res = call_ai("Solve this problem image with step-by-step logic:", image=img)
-                        st.markdown("### 💡 Solution:")
-                        st.write(res)
-
-    # --- TAB 4: PROFILE & PAYMENT ---
-    elif st.session_state.current_tab == "Profile":
-        st.subheader("👤 User Profile & Access Key")
-        passcode_display = passcode_key if passcode_key else "PRO Inactive"
-        
-        st.markdown(f"""
-        <div class="card-box">
-            <h4>Name: {st.session_state.user_data['full_name']}</h4>
-            <p><b>Username:</b> @{username}</p>
-            <p><b>Status:</b> {'👑 PRO Tier' if is_pro else '🆓 Free Tier'}</p>
-            <p><b>Remaining Days:</b> {days_left if is_pro else 0} Days</p>
-            <p><b>Passcode Key:</b></p>
-            <div class="passcode-badge">{passcode_display}</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        st.divider()
-        st.subheader("💳 Upgrade to PRO Plan (₹79)")
-        st.link_button("🚀 Pay ₹79 via Instamojo / UPI", "https://rzp.io/rzp/R3sR8rWg", use_container_width=True)
-
-        st.markdown("<br>", unsafe_allow_html=True)
-        with st.form("pay_verify_form"):
-            txn_id_input = st.text_input("Enter 12-Digit Payment Ref ID (or Admin Passcode):")
-            submit_pay = st.form_submit_button("Verify & Activate Pro", use_container_width=True)
-
-        if submit_pay:
-            if txn_id_input.strip() == PRO_PASSCODE:
-                exp, pass_k = update_pro_status(username)
-                st.success(f"🎉 Admin Passcode Accepted! PRO Active till {exp}\n\nPasscode Key: {pass_k}")
-                st.rerun()
-            else:
-                ok, msg, pass_k = validate_and_process_txn(txn_id_input, username)
-                if ok:
-                    st.success(f"{msg}\n\n🔑 Passcode Key: **{pass_k}**")
-                    st.rerun()
-                else:
-                    st.error(msg)
+            st.session_state.messages.append({"role": "assistant", "content": ai_response})
+            st.rerun()
