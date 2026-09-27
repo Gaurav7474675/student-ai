@@ -509,42 +509,9 @@ else:
                 st.session_state.messages.append({"role": "assistant", "content": res})
             st.rerun()
 
-    # =========================================================
+        # =========================================================
     # PAGE 2: ABOUT APP & PLANS
     # =========================================================
     elif st.session_state.active_page == "about":
-        st.title("📱 About & Subscription Plans")
-        st.write("Student AI aapke exam preparation aur study notes ko instant solve karne mein madad karta hai.")
-        st.divider()
-
-        st.subheader("💳 Choose Your Plan")
-        col_p1, col_p2 = st.columns(2)
-
-        with col_p1:
-            st.markdown("""
-            <div class="feature-card">
-                <h3>🆓 Free Plan</h3>
-                <p>• Max 3 Pages per PDF</p>
-                <p>• Basic Chat Assistant</p>
-                <p>• Standard AI Speed</p>
-            </div>
-            """, unsafe_allow_html=True)
-
-        with col_p2:
-            st.markdown("""
-            <div class="feature-card">
-                <h3>👑 Pro Plan (₹79/month)</h3>
-                <p>• Unlimited PDF Pages</p>
-                <p>• Photo Problem Solver</p>
-                <p>• Fast Priority AI</p>
-            </div>
-            """, unsafe_allow_html=True)
-            st.link_button("🚀 Upgrade to Pro", RAZORPAY_PAY_LINK, type="primary", use_container_width=True)
-
-    # =========================================================
-    # PAGE 3: DEVELOPER PROFILE
-    # =========================================================
-    elif st.session_state.active_page == "developer":
-        st.title("👨‍💻 Developer Profile")
-        st.write("Created by **MG Gangwar** (GM Cyber)")
-        st.write("AI Solutions & Student Assistance Systems")
+        st.markdown(f"## 📱 About {app_display_name} & Membership Plans")
+        st.write("Student AI p
