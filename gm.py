@@ -1,4 +1,4 @@
-Import streamlit as st
+import streamlit as st
 import requests
 from pypdf import PdfReader
 from PIL import Image
@@ -513,38 +513,66 @@ else:
     # PAGE 2: ABOUT APP & PLANS
     # =========================================================
     elif st.session_state.active_page == "about":
-        st.title("📱 About & Subscription Plans")
-        st.write("Student AI aapke exam preparation aur study notes ko instant solve karne mein madad karta hai.")
+        st.markdown(f"## 📱 About {app_display_name} & Membership Plans")
+        st.write("Student AI platform specially built for students to solve exam questions, generate revision notes, and analyze PDF study materials instantly.")
         st.divider()
 
-        st.subheader("💳 Choose Your Plan")
-        col_p1, col_p2 = st.columns(2)
+        col_f1, col_f2 = st.columns(2)
 
-        with col_p1:
+        with col_f1:
             st.markdown("""
             <div class="feature-card">
-                <h3>🆓 Free Plan</h3>
-                <p>• Max 3 Pages per PDF</p>
-                <p>• Basic Chat Assistant</p>
-                <p>• Standard AI Speed</p>
+                <h3>🆓 Free Version (Student AI)</h3>
+                <ul>
+                    <li><b>Unlimited Text Chat</b>: Ask doubts anytime.</li>
+                    <li><b>PDF Page Limit</b>: Strictly <b>3 Pages</b> per document.</li>
+                    <li><b>Standard AI Speed</b>.</li>
+                    <li><b>Photo Solver</b>: Not Included.</li>
+                </ul>
             </div>
             """, unsafe_allow_html=True)
 
-        with col_p2:
+        with col_f2:
             st.markdown("""
-            <div class="feature-card">
-                <h3>👑 Pro Plan (₹79/month)</h3>
-                <p>• Unlimited PDF Pages</p>
-                <p>• Photo Problem Solver</p>
-                <p>• Fast Priority AI</p>
+            <div class="feature-card" style="border: 1px solid #38BDF8;">
+                <h3 style="color: #38BDF8;">👑 Pro Version (Student AI Pro)</h3>
+                <ul>
+                    <li><b>Unlimited PDF Pages</b>: Scans 100+ page books & syllabus.</li>
+                    <li><b>Photo Question Solver</b>: Upload photos of math & science questions.</li>
+                    <li><b>Priority High Speed Response</b>.</li>
+                    <li><b>Dedicated Support</b>.</li>
+                </ul>
             </div>
             """, unsafe_allow_html=True)
-            st.link_button("🚀 Upgrade to Pro", RAZORPAY_PAY_LINK, type="primary", use_container_width=True)
+
+        if not is_pro:
+            st.link_button("💳 Upgrade to Student AI Pro (₹79/Mo)", RAZORPAY_PAY_LINK, type="primary", use_container_width=True)
 
     # =========================================================
-    # PAGE 3: DEVELOPER PROFILE
+    # PAGE 3: DEVELOPER PROFILE PAGE
     # =========================================================
     elif st.session_state.active_page == "developer":
-        st.title("👨‍💻 Developer Profile")
-        st.write("Created by **MG Gangwar** (GM Cyber)")
-        st.write("AI Solutions & Student Assistance Systems") 
+        st.markdown("## 👨‍💻 Developer Profile")
+        st.divider()
+
+        dev_col1, dev_col2 = st.columns([1, 2])
+
+        with dev_col1:
+            st.markdown("""
+            <div style="text-align: center; padding: 20px; background-color: #121212; border-radius: 12px; border: 1px solid #222;">
+                <div style="font-size: 60px;">🛡️</div>
+                <h3 style="margin-bottom: 0px;">Cyber Gaurav</h3>
+                <p style="color: #38BDF8; font-size: 14px;">Lead Developer & AI Creator</p>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with dev_col2:
+            st.markdown("""
+            ### About the Developer
+            **Cyber Gaurav** is a developer and student innovator dedicated to creating accessible AI tools for students.
+
+            - **Project Name**: Student AI / Student AI Pro
+            - **Mission**: Making exam preparation and study note extraction effortless using AI models.
+            - **Tech Stack**: Python, Streamlit, OpenRouter API, SQLite3, Custom Dark UI.
+            """)
+            st.link_button("💬 Contact Developer on WhatsApp", "https://wa.me/910000000000", use_container_width=True)
