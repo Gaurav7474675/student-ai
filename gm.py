@@ -557,12 +557,15 @@ else:
 
         dev_col1, dev_col2 = st.columns([1, 2])
 
+        # GitHub se Direct Raw Image URL
+        PROFILE_IMG_URL = "https://raw.githubusercontent.com/Gaurav7474675/student-ai/main/profile.jpeg"
+
         with dev_col1:
-            st.markdown("""
+            st.markdown(f"""
             <div style="text-align: center; padding: 20px; background-color: #121212; border-radius: 12px; border: 1px solid #222;">
-                <div style="font-size: 60px;">🛡️</div>
+                <img src="{PROFILE_IMG_URL}" style="width: 110px; height: 110px; border-radius: 50%; object-fit: cover; border: 2px solid #38BDF8; margin-bottom: 10px;">
                 <h3 style="margin-bottom: 0px;">Cyber Gaurav</h3>
-                <p style="color: #38BDF8; font-size: 14px;">Lead Developer & AI Creator</p>
+                <p style="color: #38BDF8; font-size: 14px; margin-top: 4px;">Lead Developer & AI Creator</p>
             </div>
             """, unsafe_allow_html=True)
 
@@ -575,4 +578,4 @@ else:
             - **Mission**: Making exam preparation and study note extraction effortless using AI models.
             - **Tech Stack**: Python, Streamlit, OpenRouter API, SQLite3, Custom Dark UI.
             """)
-            st.link_button("💬 Contact Developer on WhatsApp", "https://wa.me/910000000000", use_container_width=True)
+            st.link_button("💬 Contact Developer on WhatsApp", "https://www.whatsapp.com/business/", use_container_width=True)
