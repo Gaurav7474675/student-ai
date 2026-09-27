@@ -11,11 +11,11 @@ import secrets
 from datetime import datetime, timedelta
 
 # =========================================================
-# 1. PAGE CONFIG & EXACT CHATGPT MOBILE UI STYLES
+# 1. PAGE CONFIG & MODERN UI STYLES
 # =========================================================
 st.set_page_config(
-    page_title="ChatGPT - Student AI",
-    page_icon="🌐",
+    page_title="Student AI",
+    page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -26,7 +26,7 @@ st.markdown("""
     #MainMenu, footer, header {visibility: hidden !important;}
     div[data-testid="stHeader"], div[data-testid="stToolbar"], div[data-testid="stDecoration"], div[data-testid="stStatusWidget"] {display: none !important;}
 
-    /* Modern Pitch-Black Background */
+    /* Pitch-Black Dark Theme */
     .stApp {
         background-color: #000000 !important;
         color: #FFFFFF !important;
@@ -37,46 +37,48 @@ st.markdown("""
     section[data-testid="stSidebar"] {
         background-color: #0D0D0D !important;
         border-right: 1px solid #1A1A1A !important;
-        width: 300px !important;
+        width: 310px !important;
     }
 
     .block-container {
-        padding-top: 0.5rem !important;
+        padding-top: 0.8rem !important;
         padding-bottom: 7rem !important;
-        max-width: 800px !important;
+        max-width: 820px !important;
     }
 
-    /* Top ChatGPT Header Bar */
-    .top-bar-container {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 8px 0px 16px 0px;
-        border-bottom: 1px solid #1A1A1A;
-        margin-bottom: 15px;
-    }
-
-    .model-selector {
-        font-size: 18px;
-        font-weight: 600;
+    /* Dynamic Header Title Styling */
+    .app-title {
+        font-size: 20px;
+        font-weight: 700;
         color: #FFFFFF;
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: 8px;
+    }
+
+    .pro-tag {
+        background: linear-gradient(135deg, #FFD700 0%, #FF8C00 100%);
+        color: #000;
+        font-size: 11px;
+        font-weight: 800;
+        padding: 2px 8px;
+        border-radius: 6px;
+        margin-left: 6px;
+        letter-spacing: 0.5px;
     }
 
     .pro-offer-btn {
         background-color: #1E1E1E;
         color: #38BDF8;
-        padding: 6px 12px;
+        padding: 6px 14px;
         border-radius: 20px;
-        font-size: 12px;
+        font-size: 13px;
         font-weight: 600;
         text-decoration: none;
         border: 1px solid #2B2B2B;
     }
 
-    /* ChatGPT Chat Bubbles */
+    /* Chat Bubbles */
     .chat-user {
         background-color: #212121;
         color: #FFFFFF;
@@ -101,7 +103,7 @@ st.markdown("""
         line-height: 1.6;
     }
 
-    /* Floating ChatGPT Input Box Styling */
+    /* Chat Input Styling */
     .stChatInputContainer {
         padding-bottom: 15px !important;
     }
@@ -112,25 +114,19 @@ st.markdown("""
         border-radius: 28px !important;
     }
 
-    /* Sidebar Menu Custom Formatting */
-    .sidebar-menu-item {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        padding: 10px 12px;
-        color: #E3E3E3;
-        font-size: 14px;
-        border-radius: 8px;
-        margin-bottom: 4px;
+    .plan-notice {
+        font-size: 11px;
+        color: #888888;
+        text-align: center;
+        margin-top: 4px;
     }
 
-    .sidebar-section-title {
-        color: #666666;
-        font-size: 12px;
-        font-weight: 600;
-        margin-top: 15px;
-        margin-bottom: 8px;
-        padding-left: 10px;
+    .feature-card {
+        background-color: #121212;
+        border: 1px solid #222222;
+        padding: 20px;
+        border-radius: 12px;
+        margin-bottom: 15px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -183,10 +179,10 @@ def register_user(username, password, email):
                   (username, hashed_p, email))
         conn.commit()
         conn.close()
-        return True, "Account Ban Gaya! Login Karein."
+        return True, "Account Successfully Created! Please Login."
     except sqlite3.IntegrityError:
         conn.close()
-        return False, "Username Pehle Se Exists Karta Hai!"
+        return False, "Username Already Exists!"
 
 def validate_login(username, password):
     conn = sqlite3.connect("users_database.db")
@@ -232,7 +228,7 @@ def check_user_pro_validity(username):
 def validate_and_process_txn(txn_id, username):
     txn_clean = txn_id.strip()
     if len(txn_clean) < 10 or not txn_clean.isalnum():
-        return False, "❌ Invalid 12-Digit Ref ID!", None
+        return False, "❌ Invalid Ref ID!", None
     
     conn = sqlite3.connect("users_database.db")
     c = conn.cursor()
@@ -249,13 +245,16 @@ def validate_and_process_txn(txn_id, username):
     conn.close()
     
     expiry, pass_key = update_pro_status(username, days=30)
-    return True, f"🎉 Pro Plan Active Till {expiry}!", pass_key
+    return True, f"🎉 Pro Plan Activated Till {expiry}!", pass_key
 
 # =========================================================
-# 3. REFRESH & SESSION PERSISTENCE
+# 3. SESSION MANAGEMENT
 # =========================================================
 if "messages" not in st.session_state:
     st.session_state.messages = []
+
+if "active_page" not in st.session_state:
+    st.session_state.active_page = "chat"
 
 query_params = st.query_params
 persisted_user = query_params.get("session_user", None)
@@ -276,7 +275,7 @@ if "is_logged_in" not in st.session_state or not st.session_state.is_logged_in:
 # =========================================================
 def call_ai(prompt, image=None):
     if not api_key:
-        return "⚠️ API Key Missing! Setup secrets file."
+        return "⚠️ API Key Missing!"
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -309,13 +308,13 @@ def call_ai(prompt, image=None):
         return f"Network Error: {str(e)}"
 
 # =========================================================
-# 5. AUTHENTICATION MODULE
+# 5. AUTHENTICATION SCREEN
 # =========================================================
 if not st.session_state.get("is_logged_in", False):
     col_l1, col_l2, col_l3 = st.columns([1, 2, 1])
     with col_l2:
-        st.markdown("<h2 style='text-align:center;'>💬 ChatGPT Login</h2>", unsafe_allow_html=True)
-        st.caption("<p style='text-align:center;'>Student AI Pro Edition</p>", unsafe_allow_html=True)
+        st.markdown("<h2 style='text-align:center;'>🛡️ Student AI</h2>", unsafe_allow_html=True)
+        st.caption("<p style='text-align:center;'>Sign in to start learning</p>", unsafe_allow_html=True)
         st.divider()
 
         auth_tab1, auth_tab2 = st.tabs(["🔐 Sign In", "📝 Create Account"])
@@ -353,56 +352,46 @@ if not st.session_state.get("is_logged_in", False):
                         st.error(msg)
 
 # =========================================================
-# 6. MAIN CHATGPT INTERFACE SCREEN
+# 6. MAIN APPLICATION SCREEN
 # =========================================================
 else:
     username = st.session_state.user_data["username"]
     is_pro, expiry_info, days_left, passcode_key = check_user_pro_validity(username)
 
-    # --- CHATGPT SIDEBAR DRAWER MENU ---
+    # Dynamic Name Variable Logic
+    app_display_name = "Student AI Pro" if is_pro else "Student AI"
+
+    # --- SIDEBAR DRAWER NAVIGATION MENU ---
     with st.sidebar:
-        if st.button("➕  Nai Chat", use_container_width=True):
-            st.session_state.messages = []
+        st.markdown(f"### 🛡️ {app_display_name}")
+        st.caption(f"Logged as **@{username}** ({'👑 PRO' if is_pro else '🆓 Free Plan'})")
+        st.divider()
+
+        if st.button("💬 Chat AI Interface", use_container_width=True):
+            st.session_state.active_page = "chat"
             st.rerun()
 
-        st.markdown("""
-        <div style="margin-top: 10px;">
-            <div class="sidebar-menu-item">🖼️ <span>Images</span></div>
-            <div class="sidebar-menu-item">📚 <span>Library</span></div>
-            <div class="sidebar-menu-item">📅 <span>Scheduled</span></div>
-            <div class="sidebar-menu-item">🎡 <span>Playgrounds</span></div>
-            <div class="sidebar-menu-item">📁 <span>Projects</span></div>
-            <div class="sidebar-menu-item">💻 <span>Codex</span></div>
-        </div>
-        """, unsafe_allow_html=True)
+        if st.button("📱 About App & Plans", use_container_width=True):
+            st.session_state.active_page = "about"
+            st.rerun()
 
-        st.markdown('<div class="sidebar-section-title">Haliya Chats</div>', unsafe_allow_html=True)
-        st.markdown("""
-        <div class="sidebar-menu-item">💬 Greeting response</div>
-        <div class="sidebar-menu-item">💬 Casual greeting</div>
-        <div class="sidebar-menu-item">💬 Student AI Study Plan</div>
-        """, unsafe_allow_html=True)
+        if st.button("👨‍💻 Developer Profile", use_container_width=True):
+            st.session_state.active_page = "developer"
+            st.rerun()
 
         st.divider()
 
-        # DEVELOPER PROFILE MODAL
-        with st.expander("👨‍💻 Developer Profile"):
-            st.write("**Cyber Gaurav**")
-            st.caption("Ethical Hacker & Lead Student Developer")
-            st.link_button("💬 Connect WhatsApp", "https://wa.me/910000000000", use_container_width=True)
-
-        # PRO PLAN UPGRADE & VERIFICATION
-        with st.expander("🎁 Get PRO / Upgrade Option"):
-            st.write(f"**Current Status:** {'👑 PRO' if is_pro else '🆓 Free Plan'}")
+        # Pro Plan Activation Box
+        with st.expander("💳 Upgrade / Activate Pro"):
             if is_pro:
-                st.write(f"**Days Left:** {days_left}")
-                st.write(f"**Passcode:** `{passcode_key}`")
+                st.success(f"PRO Active! Days Left: {days_left}")
+                st.code(f"Passcode: {passcode_key}")
             else:
-                st.write("**Unlock Pro Limits (₹79/Month)**")
+                st.write("Unlock Unlimited PDF Pages & Photo Solver!")
                 st.link_button("💳 Pay ₹79 via Razorpay", RAZORPAY_PAY_LINK, use_container_width=True)
                 
-                txn_input = st.text_input("Enter 12-Digit Ref ID / Key:", key="pro_key_input")
-                if st.button("Activate Pro", use_container_width=True):
+                txn_input = st.text_input("Enter 12-Digit Ref ID / Passcode:", key="side_pro_key")
+                if st.button("Activate Pro Plan", use_container_width=True):
                     if txn_input.strip() == PRO_PASSCODE:
                         exp, pass_k = update_pro_status(username)
                         st.success("🎉 Admin Passcode Accepted!")
@@ -421,85 +410,157 @@ else:
             st.query_params.clear()
             st.rerun()
 
-        st.markdown(f"<div style='margin-top:20px; font-size:12px; color:#888;'>Logged as <b>@{username}</b> ({'PRO' if is_pro else 'Free'})</div>", unsafe_allow_html=True)
-
-    # --- TOP CHATGPT NAVIGATION BAR ---
-    col_t1, col_t2 = st.columns([3, 1])
-    with col_t1:
-        st.markdown("""
-        <div class="model-selector">
-            <span>ChatGPT</span> <span style="font-size:12px; color:#888;">▼</span>
-        </div>
-        """, unsafe_allow_html=True)
-    with col_t2:
-        # VISIBLE PRO UPGRADE LINK ON MAIN APP TOP BAR
+    # --- TOP APP HEADER BAR ---
+    col_h1, col_h2 = st.columns([3, 1])
+    with col_h1:
+        pro_badge_html = '<span class="pro-tag">PRO</span>' if is_pro else ''
         st.markdown(f"""
-        <div style="text-align: right;">
-            <a href="{RAZORPAY_PAY_LINK}" target="_blank" class="pro-offer-btn">🎁 Free Offer / Upgrade Pro</a>
+        <div class="app-title">
+            <span>🛡️ {app_display_name}</span> {pro_badge_html}
         </div>
         """, unsafe_allow_html=True)
+        
+    with col_h2:
+        if not is_pro:
+            st.markdown(f"""
+            <div style="text-align: right;">
+                <a href="{RAZORPAY_PAY_LINK}" target="_blank" class="pro-offer-btn">🎁 Free Offer / Upgrade Pro</a>
+            </div>
+            """, unsafe_allow_html=True)
 
     st.divider()
 
-    # Empty State Greeting
-    if not st.session_state.messages:
-        st.markdown(f"<h3 style='text-align: center; margin-top: 40px;'>Hi {username}! 👋</h3>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #8E8E93;'>Kya bana rahe ho aaj? 🚀</p>", unsafe_allow_html=True)
+    # =========================================================
+    # PAGE 1: CHAT INTERFACE
+    # =========================================================
+    if st.session_state.active_page == "chat":
+        
+        if not st.session_state.messages:
+            st.markdown(f"<h3 style='text-align: center; margin-top: 30px;'>Hi {username}! 👋</h3>", unsafe_allow_html=True)
+            st.markdown("<p style='text-align: center; color: #8E8E93;'>Apne Doubts, PDF Notes, ya Exam Questions upload karke solution paayein!</p>", unsafe_allow_html=True)
 
-    # Render Chat Flow
-    for msg in st.session_state.messages:
-        if msg["role"] == "user":
-            st.markdown(f'<div class="chat-user">{msg["content"]}</div>', unsafe_allow_html=True)
-        else:
-            st.markdown(f'<div class="chat-ai">{msg["content"]}</div>', unsafe_allow_html=True)
-
-    st.markdown("<div style='clear: both;'></div>", unsafe_allow_html=True)
-
-    # PDF & IMAGE TOOL ATTACHMENT POPOVER
-    with st.popover("📎 Attach PDF Notes / Photo Question"):
-        st.markdown("### Attach Document / Image")
-        attach_type = st.radio("Choose Mode:", ["PDF Exam Solver", "Photo Problem Solver"])
-
-        if attach_type == "PDF Exam Solver":
-            uploaded_pdf = st.file_uploader("Upload PDF Notes:", type=["pdf"])
-            pdf_feature = st.selectbox("Output Select Karein:", ["⚡ Quick Revision Notes", "🎯 Important Exam Questions", "🧪 Practice Quiz (MCQs)"])
-            
-            if uploaded_pdf and st.button("🚀 Solve / Process PDF", type="primary", use_container_width=True):
-                reader = PdfReader(io.BytesIO(uploaded_pdf.getvalue()))
-                page_count = len(reader.pages)
-                
-                if page_count > 3 and not is_pro:
-                    st.error("🔒 Free tier max 3 pages limit! Upgrade to PRO in top bar.")
-                else:
-                    max_p = min(page_count, 3) if not is_pro else page_count
-                    extracted_text = "".join([p.extract_text() or "" for p in reader.pages[:max_p]])
-                    prompt_text = f"Analyze document and generate '{pdf_feature}':\n\n{extracted_text[:80000]}"
-                    
-                    st.session_state.messages.append({"role": "user", "content": f"📂 Analyzed PDF: {uploaded_pdf.name}"})
-                    with st.spinner("Processing PDF..."):
-                        res = call_ai(prompt_text)
-                        st.session_state.messages.append({"role": "assistant", "content": res})
-                    st.rerun()
-
-        elif attach_type == "Photo Problem Solver":
-            if not is_pro:
-                st.error("🔒 Photo Solver requires PRO version. Upgrade from Top Bar / Sidebar.")
+        for msg in st.session_state.messages:
+            if msg["role"] == "user":
+                st.markdown(f'<div class="chat-user">{msg["content"]}</div>', unsafe_allow_html=True)
             else:
-                uploaded_img = st.file_uploader("Upload Image:", type=["jpg", "png", "jpeg"])
-                if uploaded_img and st.button("⚡ Solve Photo Question", type="primary", use_container_width=True):
-                    img = Image.open(uploaded_img)
-                    st.session_state.messages.append({"role": "user", "content": f"📷 Photo Question Uploaded"})
-                    with st.spinner("Solving..."):
-                        res = call_ai("Solve this problem image with detailed logic:", image=img)
-                        st.session_state.messages.append({"role": "assistant", "content": res})
-                    st.rerun()
+                st.markdown(f'<div class="chat-ai">{msg["content"]}</div>', unsafe_allow_html=True)
 
-    # MAIN CHAT INPUT CONTAINER
-    user_prompt = st.chat_input("Kuch bhi puchein...")
+        st.markdown("<div style='clear: both;'></div>", unsafe_allow_html=True)
 
-    if user_prompt:
-        st.session_state.messages.append({"role": "user", "content": user_prompt})
-        with st.spinner("Thinking..."):
-            res = call_ai(user_prompt)
-            st.session_state.messages.append({"role": "assistant", "content": res})
-        st.rerun()
+        # PDF & Photo Attachment
+        with st.popover("📎 Attach PDF Notes / Photo Problem"):
+            st.markdown("### Attach Document / Image")
+            attach_type = st.radio("Choose Mode:", ["PDF Exam Solver", "Photo Problem Solver"])
+
+            if attach_type == "PDF Exam Solver":
+                uploaded_pdf = st.file_uploader("Upload PDF Notes:", type=["pdf"])
+                pdf_feature = st.selectbox("Output Format:", ["⚡ Quick Revision Notes", "🎯 Important Exam Questions", "🧪 Practice Quiz (MCQs)"])
+                
+                if uploaded_pdf and st.button("🚀 Process PDF", type="primary", use_container_width=True):
+                    reader = PdfReader(io.BytesIO(uploaded_pdf.getvalue()))
+                    page_count = len(reader.pages)
+                    
+                    if page_count > 3 and not is_pro:
+                        st.error("🔒 Free version me maximum 3 pages allowed hain! Pro version me upgrade karein unlimited pages ke liye.")
+                    else:
+                        max_pages = page_count if is_pro else min(page_count, 3)
+                        extracted_text = "".join([p.extract_text() or "" for p in reader.pages[:max_pages]])
+                        prompt_text = f"Analyze document and generate '{pdf_feature}':\n\n{extracted_text[:80000]}"
+                        
+                        st.session_state.messages.append({"role": "user", "content": f"📂 Analyzed PDF: {uploaded_pdf.name}"})
+                        with st.spinner("Processing PDF..."):
+                            res = call_ai(prompt_text)
+                            st.session_state.messages.append({"role": "assistant", "content": res})
+                        st.rerun()
+
+            elif attach_type == "Photo Problem Solver":
+                if not is_pro:
+                    st.error("🔒 Photo Solver feature Pro version me available hai.")
+                else:
+                    uploaded_img = st.file_uploader("Upload Image:", type=["jpg", "png", "jpeg"])
+                    if uploaded_img and st.button("⚡ Solve Photo Question", type="primary", use_container_width=True):
+                        img = Image.open(uploaded_img)
+                        st.session_state.messages.append({"role": "user", "content": f"📷 Photo Question Uploaded"})
+                        with st.spinner("Solving Question..."):
+                            res = call_ai("Solve this question with step-by-step detail:", image=img)
+                            st.session_state.messages.append({"role": "assistant", "content": res})
+                        st.rerun()
+
+        # Chat Input Bar
+        user_prompt = st.chat_input("Kuch bhi puchein...")
+        st.markdown(f"<div class='plan-notice'>Plan Mode: {'Pro (Unlimited PDF Pages)' if is_pro else 'Free Tier (Max 3 Pages per PDF)'}</div>", unsafe_allow_html=True)
+
+        if user_prompt:
+            st.session_state.messages.append({"role": "user", "content": user_prompt})
+            with st.spinner("Thinking..."):
+                res = call_ai(user_prompt)
+                st.session_state.messages.append({"role": "assistant", "content": res})
+            st.rerun()
+
+    # =========================================================
+    # PAGE 2: ABOUT APP & PLANS
+    # =========================================================
+    elif st.session_state.active_page == "about":
+        st.markdown(f"## 📱 About {app_display_name} & Membership Plans")
+        st.write("Student AI platform specially built for students to solve exam questions, generate revision notes, and analyze PDF study materials instantly.")
+        st.divider()
+
+        col_f1, col_f2 = st.columns(2)
+
+        with col_f1:
+            st.markdown("""
+            <div class="feature-card">
+                <h3>🆓 Free Version (Student AI)</h3>
+                <ul>
+                    <li><b>Unlimited Text Chat</b>: Ask doubts anytime.</li>
+                    <li><b>PDF Page Limit</b>: Strictly <b>3 Pages</b> per document.</li>
+                    <li><b>Standard AI Speed</b>.</li>
+                    <li><b>Photo Solver</b>: Not Included.</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with col_f2:
+            st.markdown("""
+            <div class="feature-card" style="border: 1px solid #38BDF8;">
+                <h3 style="color: #38BDF8;">👑 Pro Version (Student AI Pro)</h3>
+                <ul>
+                    <li><b>Unlimited PDF Pages</b>: Scans 100+ page books & syllabus.</li>
+                    <li><b>Photo Question Solver</b>: Upload photos of math & science questions.</li>
+                    <li><b>Priority High Speed Response</b>.</li>
+                    <li><b>Dedicated Support</b>.</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+
+        if not is_pro:
+            st.link_button("💳 Upgrade to Student AI Pro (₹79/Mo)", RAZORPAY_PAY_LINK, type="primary", use_container_width=True)
+
+    # =========================================================
+    # PAGE 3: DEVELOPER PROFILE PAGE
+    # =========================================================
+    elif st.session_state.active_page == "developer":
+        st.markdown("## 👨‍💻 Developer Profile")
+        st.divider()
+
+        dev_col1, dev_col2 = st.columns([1, 2])
+
+        with dev_col1:
+            st.markdown("""
+            <div style="text-align: center; padding: 20px; background-color: #121212; border-radius: 12px; border: 1px solid #222;">
+                <div style="font-size: 60px;">🛡️</div>
+                <h3 style="margin-bottom: 0px;">Cyber Gaurav</h3>
+                <p style="color: #38BDF8; font-size: 14px;">Lead Developer & AI Creator</p>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with dev_col2:
+            st.markdown("""
+            ### About the Developer
+            **Cyber Gaurav** is a developer and student innovator dedicated to creating accessible AI tools for students.
+
+            - **Project Name**: Student AI / Student AI Pro
+            - **Mission**: Making exam preparation and study note extraction effortless using AI models.
+            - **Tech Stack**: Python, Streamlit, OpenRouter API, SQLite3, Custom Dark UI.
+            """)
+            st.link_button("💬 Contact Developer on WhatsApp", "https://wa.me/910000000000", use_container_width=True)
