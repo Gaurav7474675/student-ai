@@ -514,4 +514,4 @@ else:
     # =========================================================
     elif st.session_state.active_page == "about":
         st.markdown(f"## 📱 About {app_display_name} & Membership Plans")
-        st.write("Student AI p
+        st.write("Student AI pro")
