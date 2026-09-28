@@ -131,118 +131,125 @@ st.markdown("""
 api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
 PRO_PASSCODE = st.secrets.get("PRO_PASSCODE") or os.environ.get("PRO_PASSCODE") or "GMCYBER2026"
 RAZORPAY_PAY_LINK = "https://rzp.io/rzp/R3sR8rWg"
+DB_FILE = "users_database.db"
+
+def get_db_connection():
+    return sqlite3.connect(DB_FILE, timeout=10)
 
 def hash_password(password):
-    return hashlib.sha256(password.encode()).hexdigest()
+    return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
 def generate_passcode():
     return f"PRO-{secrets.token_hex(4).upper()}"
 
 def init_db():
-    conn = sqlite3.connect("users_database.db")
-    c = conn.cursor()
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            username TEXT PRIMARY KEY,
-            password TEXT,
-            email TEXT,
-            is_pro INTEGER DEFAULT 0,
-            pro_expiry TEXT,
-            passcode TEXT
-        )
-    ''')
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS transactions (
-            txn_id TEXT PRIMARY KEY,
-            username TEXT,
-            status TEXT,
-            timestamp TEXT
-        )
-    ''')
-    conn.commit()
-    conn.close()
+    try:
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    username TEXT PRIMARY KEY,
+                    password TEXT,
+                    email TEXT,
+                    is_pro INTEGER DEFAULT 0,
+                    pro_expiry TEXT,
+                    passcode TEXT
+                )
+            ''')
+            c.execute('''
+                CREATE TABLE IF NOT EXISTS transactions (
+                    txn_id TEXT PRIMARY KEY,
+                    username TEXT,
+                    status TEXT,
+                    timestamp TEXT
+                )
+            ''')
+            conn.commit()
+    except Exception as e:
+        st.error(f"Database Initialization Error: {str(e)}")
 
 init_db()
 
 def register_user(username, password, email):
-    conn = sqlite3.connect("users_database.db")
-    c = conn.cursor()
     hashed_p = hash_password(password)
     try:
-        c.execute("INSERT INTO users (username, password, email, is_pro) VALUES (?, ?, ?, 0)",
-                  (username, hashed_p, email))
-        conn.commit()
-        conn.close()
-        return True, "Account Created! Please Login."
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute("INSERT INTO users (username, password, email, is_pro) VALUES (?, ?, ?, 0)",
+                      (username, hashed_p, email))
+            conn.commit()
+            return True, "Account Created! Please Login."
     except sqlite3.IntegrityError:
-        conn.close()
         return False, "Username Already Exists!"
+    except Exception as e:
+        return False, f"Registration Error: {str(e)}"
 
 def validate_login(username, password):
-    conn = sqlite3.connect("users_database.db")
-    c = conn.cursor()
     hashed_p = hash_password(password)
-    c.execute("SELECT username, email, is_pro, pro_expiry, passcode FROM users WHERE username=? AND password=?", (username, hashed_p))
-    user = c.fetchone()
-    conn.close()
-    return user
+    try:
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute("SELECT username, email, is_pro, pro_expiry, passcode FROM users WHERE username=? AND password=?", (username, hashed_p))
+            return c.fetchone()
+    except Exception:
+        return None
 
 def update_pro_status(username, days=30):
     expiry_date = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
     new_passcode = generate_passcode()
-    conn = sqlite3.connect("users_database.db")
-    c = conn.cursor()
-    c.execute("UPDATE users SET is_pro=1, pro_expiry=?, passcode=? WHERE username=?", (expiry_date, new_passcode, username))
-    conn.commit()
-    conn.close()
-    return expiry_date, new_passcode
+    try:
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute("UPDATE users SET is_pro=1, pro_expiry=?, passcode=? WHERE username=?", (expiry_date, new_passcode, username))
+            conn.commit()
+        return expiry_date, new_passcode
+    except Exception as e:
+        return None, str(e)
 
 def check_user_pro_validity(username):
-    conn = sqlite3.connect("users_database.db")
-    c = conn.cursor()
-    c.execute("SELECT is_pro, pro_expiry, passcode FROM users WHERE username=?", (username,))
-    row = c.fetchone()
-    conn.close()
-    
-    if not row or row[0] == 0 or not row[1]:
+    try:
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute("SELECT is_pro, pro_expiry, passcode FROM users WHERE username=?", (username,))
+            row = c.fetchone()
+            
+            if not row or row[0] == 0 or not row[1]:
+                return False, "Free Tier", 0, None
+            
+            expiry_dt = datetime.strptime(row[1], "%Y-%m-%d %H:%M:%S")
+            if datetime.now() > expiry_dt:
+                c.execute("UPDATE users SET is_pro=0 WHERE username=?", (username,))
+                conn.commit()
+                return False, "Expired", 0, None
+            
+            days_left = (expiry_dt - datetime.now()).days
+            return True, row[1], max(0, days_left), row[2]
+    except Exception:
         return False, "Free Tier", 0, None
-    
-    expiry_dt = datetime.strptime(row[1], "%Y-%m-%d %H:%M:%S")
-    if datetime.now() > expiry_dt:
-        conn = sqlite3.connect("users_database.db")
-        c = conn.cursor()
-        c.execute("UPDATE users SET is_pro=0 WHERE username=?", (username,))
-        conn.commit()
-        conn.close()
-        return False, "Expired", 0, None
-    
-    days_left = (expiry_dt - datetime.now()).days
-    return True, row[1], days_left, row[2]
 
 def validate_and_process_txn(txn_id, username):
     txn_clean = txn_id.strip()
-    if len(txn_clean) < 10 or not txn_clean.isalnum():
+    if len(txn_clean) < 8 or not txn_clean.isalnum():
         return False, "❌ Invalid Ref ID!", None
     
-    conn = sqlite3.connect("users_database.db")
-    c = conn.cursor()
-    c.execute("SELECT txn_id FROM transactions WHERE txn_id=?", (txn_clean,))
-    existing = c.fetchone()
-    
-    if existing:
-        conn.close()
-        return False, "⚠️ Ref ID Already Used!", None
-    
-    c.execute("INSERT INTO transactions (txn_id, username, status, timestamp) VALUES (?, ?, 'APPROVED', ?)",
-              (txn_clean, username, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-    conn.commit()
-    conn.close()
-    
-    expiry, pass_key = update_pro_status(username, days=30)
-    return True, f"🎉 Pro Plan Active Till {expiry}!", pass_key
+    try:
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute("SELECT txn_id FROM transactions WHERE txn_id=?", (txn_clean,))
+            if c.fetchone():
+                return False, "⚠️ Ref ID Already Used!", None
+            
+            c.execute("INSERT INTO transactions (txn_id, username, status, timestamp) VALUES (?, ?, 'APPROVED', ?)",
+                      (txn_clean, username, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+            conn.commit()
+            
+        expiry, pass_key = update_pro_status(username, days=30)
+        return True, f"🎉 Pro Plan Active Till {expiry}!", pass_key
+    except Exception as e:
+        return False, f"Transaction Verification Error: {str(e)}", None
 
 # =========================================================
-# 3. SESSION MANAGEMENT
+# 3. SESSION MANAGEMENT & PERSISTENCE FIX
 # =========================================================
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -253,26 +260,27 @@ if "active_page" not in st.session_state:
 if "show_sidebar" not in st.session_state:
     st.session_state.show_sidebar = False
 
-query_params = st.query_params
-persisted_user = query_params.get("session_user", None)
+# Persistent Session Hydration from Query Params
+persisted_user = st.query_params.get("session_user", None)
 
-if "is_logged_in" not in st.session_state or not st.session_state.is_logged_in:
-    if persisted_user:
-        conn = sqlite3.connect("users_database.db")
-        c = conn.cursor()
-        c.execute("SELECT username, email FROM users WHERE username=?", (persisted_user,))
-        user_rec = c.fetchone()
-        conn.close()
-        if user_rec:
-            st.session_state.is_logged_in = True
-            st.session_state.user_data = {"username": user_rec[0], "email": user_rec[1]}
+if ("is_logged_in" not in st.session_state or not st.session_state.is_logged_in) and persisted_user:
+    try:
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute("SELECT username, email FROM users WHERE username=?", (persisted_user,))
+            user_rec = c.fetchone()
+            if user_rec:
+                st.session_state.is_logged_in = True
+                st.session_state.user_data = {"username": user_rec[0], "email": user_rec[1]}
+    except Exception:
+        pass
 
 # =========================================================
 # 4. AI PIPELINE ENGINE
 # =========================================================
 def call_ai(prompt, image=None):
     if not api_key:
-        return "⚠️ API Key Missing!"
+        return "⚠️ API Key Missing! Kripya Streamlit Secrets mein GEMINI_API_KEY add karein."
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -282,13 +290,16 @@ def call_ai(prompt, image=None):
     content_payload = [{"type": "text", "text": prompt}]
 
     if image:
-        buffered = io.BytesIO()
-        image.save(buffered, format="PNG")
-        img_str = base64.b64encode(buffered.getvalue()).decode()
-        content_payload.append({
-            "type": "image_url",
-            "image_url": {"url": f"data:image/png;base64,{img_str}"}
-        })
+        try:
+            buffered = io.BytesIO()
+            image.save(buffered, format="PNG")
+            img_str = base64.b64encode(buffered.getvalue()).decode()
+            content_payload.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/png;base64,{img_str}"}
+            })
+        except Exception as img_err:
+            return f"Image Processing Error: {str(img_err)}"
 
     payload = {
         "model": "google/gemini-2.5-flash",
@@ -297,10 +308,12 @@ def call_ai(prompt, image=None):
     }
 
     try:
-        response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload, timeout=120)
+        response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload, timeout=60)
         if response.status_code == 200:
             return response.json()["choices"][0]["message"]["content"]
-        return f"API Error: {response.text}"
+        return f"API Error ({response.status_code}): {response.text}"
+    except requests.exceptions.Timeout:
+        return "⚠️ Timeout Error: Server response lene mein zyada samay le raha hai. Kripya punah prayas karein."
     except Exception as e:
         return f"Network Error: {str(e)}"
 
@@ -379,7 +392,8 @@ else:
         with st.expander("💳 Upgrade / Activate Pro"):
             if is_pro:
                 st.success(f"PRO Active! Days Left: {days_left}")
-                st.code(f"Passcode: {passcode_key}")
+                if passcode_key:
+                    st.code(f"Passcode: {passcode_key}")
             else:
                 st.write("Unlock Unlimited PDF Pages & Photo Solver!")
                 st.link_button("💳 Pay ₹79 via Razorpay", RAZORPAY_PAY_LINK, use_container_width=True)
@@ -469,21 +483,24 @@ else:
                 pdf_feature = st.selectbox("Output Format:", ["⚡ Quick Revision Notes", "🎯 Important Exam Questions", "🧪 Practice Quiz (MCQs)"])
                 
                 if uploaded_pdf and st.button("🚀 Process PDF", type="primary", use_container_width=True):
-                    reader = PdfReader(io.BytesIO(uploaded_pdf.getvalue()))
-                    page_count = len(reader.pages)
-                    
-                    if page_count > 3 and not is_pro:
-                        st.error("🔒 Free version me maximum 3 pages allowed hain! Upgrade to Pro for unlimited pages.")
-                    else:
-                        max_pages = page_count if is_pro else min(page_count, 3)
-                        extracted_text = "".join([p.extract_text() or "" for p in reader.pages[:max_pages]])
-                        prompt_text = f"Analyze document and generate '{pdf_feature}':\n\n{extracted_text[:80000]}"
+                    try:
+                        reader = PdfReader(io.BytesIO(uploaded_pdf.getvalue()))
+                        page_count = len(reader.pages)
                         
-                        st.session_state.messages.append({"role": "user", "content": f"📂 Analyzed PDF: {uploaded_pdf.name}"})
-                        with st.spinner("Processing PDF..."):
-                            res = call_ai(prompt_text)
-                            st.session_state.messages.append({"role": "assistant", "content": res})
-                        st.rerun()
+                        if page_count > 3 and not is_pro:
+                            st.error("🔒 Free version me maximum 3 pages allowed hain! Upgrade to Pro for unlimited pages.")
+                        else:
+                            max_pages = page_count if is_pro else min(page_count, 3)
+                            extracted_text = "".join([p.extract_text() or "" for p in reader.pages[:max_pages]])
+                            prompt_text = f"Analyze document and generate '{pdf_feature}':\n\n{extracted_text[:80000]}"
+                            
+                            st.session_state.messages.append({"role": "user", "content": f"📂 Analyzed PDF: {uploaded_pdf.name}"})
+                            with st.spinner("Processing PDF..."):
+                                res = call_ai(prompt_text)
+                                st.session_state.messages.append({"role": "assistant", "content": res})
+                            st.rerun()
+                    except Exception as pdf_err:
+                        st.error(f"Error parsing PDF: {str(pdf_err)}")
 
             elif attach_type == "Photo Problem Solver":
                 if not is_pro:
@@ -491,12 +508,15 @@ else:
                 else:
                     uploaded_img = st.file_uploader("Upload Image:", type=["jpg", "png", "jpeg"])
                     if uploaded_img and st.button("⚡ Solve Photo Question", type="primary", use_container_width=True):
-                        img = Image.open(uploaded_img)
-                        st.session_state.messages.append({"role": "user", "content": f"📷 Photo Question Uploaded"})
-                        with st.spinner("Solving Question..."):
-                            res = call_ai("Solve this question with step-by-step detail:", image=img)
-                            st.session_state.messages.append({"role": "assistant", "content": res})
-                        st.rerun()
+                        try:
+                            img = Image.open(uploaded_img)
+                            st.session_state.messages.append({"role": "user", "content": f"📷 Photo Question Uploaded"})
+                            with st.spinner("Solving Question..."):
+                                res = call_ai("Solve this question with step-by-step detail:", image=img)
+                                st.session_state.messages.append({"role": "assistant", "content": res})
+                            st.rerun()
+                        except Exception as img_err:
+                            st.error(f"Error processing image: {str(img_err)}")
 
         # Chat Input Bar
         user_prompt = st.chat_input("Kuch bhi puchein...")
@@ -509,7 +529,7 @@ else:
                 st.session_state.messages.append({"role": "assistant", "content": res})
             st.rerun()
 
-        # =========================================================
+    # =========================================================
     # PAGE 2: ABOUT APP & PLANS
     # =========================================================
     elif st.session_state.active_page == "about":
@@ -571,7 +591,9 @@ else:
                         st.error(msg)
         else:
             st.success(f"🎉 Pro Active! Days Left: {days_left}")
-            st.code(f"Passcode Key: {passcode_key}")
+            if passcode_key:
+                st.code(f"Passcode Key: {passcode_key}")
+
     # =========================================================
     # PAGE 3: DEVELOPER PROFILE PAGE
     # =========================================================
@@ -581,7 +603,6 @@ else:
 
         dev_col1, dev_col2 = st.columns([1, 2])
 
-        # GitHub se Direct Raw Image URL
         PROFILE_IMG_URL = "https://raw.githubusercontent.com/Gaurav7474675/student-ai/main/profile.jpeg"
 
         with dev_col1:
