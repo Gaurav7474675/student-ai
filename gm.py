@@ -571,7 +571,7 @@ else:
                         st.error(msg)
         else:
             st.success(f"🎉 Pro Active! Days Left: {days_left}")
-            st.code(f"Passcode Key: {passcode_key}")pp0pp
+            st.code(f"Passcode Key: {passcode_key}")
     # =========================================================
     # PAGE 3: DEVELOPER PROFILE PAGE
     # =========================================================
