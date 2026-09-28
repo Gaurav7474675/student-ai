@@ -509,7 +509,7 @@ else:
                 st.session_state.messages.append({"role": "assistant", "content": res})
             st.rerun()
 
-    # =========================================================
+        # =========================================================
     # PAGE 2: ABOUT APP & PLANS
     # =========================================================
     elif st.session_state.active_page == "about":
@@ -541,13 +541,37 @@ else:
                     <li><b>Photo Question Solver</b>: Upload photos of math & science questions.</li>
                     <li><b>Priority High Speed Response</b>.</li>
                     <li><b>Dedicated Support</b>.</li>
+                    <li><b>Enter : UTR & Hidden Key</b>.</li>
                 </ul>
             </div>
             """, unsafe_allow_html=True)
 
-        if not is_pro:
-            st.link_button("💳 Upgrade to Student AI Pro (₹79/Mo)", RAZORPAY_PAY_LINK, type="primary", use_container_width=True)
+        st.divider()
 
+        if not is_pro:
+            st.subheader("💳 Activate Pro Membership")
+            st.link_button("💳 Pay ₹79 via Razorpay", RAZORPAY_PAY_LINK, type="primary", use_container_width=True)
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            with st.form("about_pro_activate_form"):
+                utr_code_input = st.text_input("Enter 12-Digit UTR / Ref ID (or Admin Passcode):", placeholder="UTR 328901234567 or Enter key")
+                submit_utr = st.form_submit_button("⚡ Activate Pro Plan", type="primary", use_container_width=True)
+
+            if submit_utr:
+                if utr_code_input.strip() == PRO_PASSCODE:
+                    exp, pass_k = update_pro_status(username)
+                    st.success(f"🎉 Admin Passcode Accepted! PRO Active till {exp}")
+                    st.rerun()
+                else:
+                    ok, msg, pass_k = validate_and_process_txn(utr_code_input, username)
+                    if ok:
+                        st.success(f"{msg}\n\n🔑 Passcode Key: **{pass_k}**")
+                        st.rerun()
+                    else:
+                        st.error(msg)
+        else:
+            st.success(f"🎉 Pro Active! Days Left: {days_left}")
+            st.code(f"Passcode Key: {passcode_key}")pp0pp
     # =========================================================
     # PAGE 3: DEVELOPER PROFILE PAGE
     # =========================================================
