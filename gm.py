@@ -206,47 +206,46 @@ def update_pro_status(username, days=30):
     except Exception as e:
         return None, str(e)
 
-def check_user_pro_validity(username):
-    try:
-        with get_db_connection() as conn:
-            c = conn.cursor()
-            c.execute("SELECT is_pro, pro_expiry, passcode FROM users WHERE username=?", (username,))
-            row = c.fetchone()
-            
-            if not row or row[0] == 0 or not row[1]:
-                return False, "Free Tier", 0, None
-            
-            expiry_dt = datetime.strptime(row[1], "%Y-%m-%d %H:%M:%S")
-            if datetime.now() > expiry_dt:
-                c.execute("UPDATE users SET is_pro=0 WHERE username=?", (username,))
+# =========================================================
+# 2. DATABASE & BACKEND PERSISTENCE (UPDATED VERIFICATION)
+# =========================================================
+
+# Purana validate_and_process_txn() hata kar ye naya function aur secret variable add karein:
+
+RAZORPAY_WEBHOOK_SECRET = st.secrets.get("RAZORPAY_WEBHOOK_SECRET") or "your_webhook_secret_here"
+
+def verify_and_activate_razorpay_payment(payment_id, order_id, signature, username):
+    """
+    Razorpay HMAC-SHA256 Signature Verify karke Pro Activate karta hai.
+    Sath hi Webhook events se bhi Sync karta hai.
+    """
+    import hmac
+    
+    # Signature Generation for Security Check
+    msg = f"{order_id}|{payment_id}"
+    secret = st.secrets.get("RAZORPAY_KEY_SECRET", "")
+    
+    generated_signature = hmac.new(
+        bytes(secret, 'utf-8'),
+        bytes(msg, 'utf-8'),
+        hashlib.sha256
+    ).hexdigest()
+
+    if generated_signature == signature:
+        # Secure Payment Confirmed By Razorpay
+        ok, expiry = update_pro_status(username, days=30)
+        if ok:
+            # Save verified Transaction ID to Database
+            with get_db_connection() as conn:
+                c = conn.cursor()
+                c.execute("INSERT OR REPLACE INTO transactions (txn_id, username, status, timestamp) VALUES (?, ?, 'SUCCESS', ?)",
+                          (payment_id, username, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
                 conn.commit()
-                return False, "Expired", 0, None
-            
-            days_left = (expiry_dt - datetime.now()).days
-            return True, row[1], max(0, days_left), row[2]
-    except Exception:
-        return False, "Free Tier", 0, None
+            return True, f"🎉 Real Payment Verified! Pro Active Till {expiry}"
+    
+    return False, "❌ Payment Verification Failed! Invalid/Tampered Signature."
 
 def validate_and_process_txn(txn_id, username):
-    txn_clean = txn_id.strip()
-    if len(txn_clean) < 8 or not txn_clean.isalnum():
-        return False, "❌ Invalid Ref ID!", None
-    
-    try:
-        with get_db_connection() as conn:
-            c = conn.cursor()
-            c.execute("SELECT txn_id FROM transactions WHERE txn_id=?", (txn_clean,))
-            if c.fetchone():
-                return False, "⚠️ Ref ID Already Used!", None
-            
-            c.execute("INSERT INTO transactions (txn_id, username, status, timestamp) VALUES (?, ?, 'APPROVED', ?)",
-                      (txn_clean, username, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-            conn.commit()
-            
-        expiry, pass_key = update_pro_status(username, days=30)
-        return True, f"🎉 Pro Plan Active Till {expiry}!", pass_key
-    except Exception as e:
-        return False, f"Transaction Verification Error: {str(e)}", None
 
 # =========================================================
 # 3. SESSION MANAGEMENT & PERSISTENCE FIX
