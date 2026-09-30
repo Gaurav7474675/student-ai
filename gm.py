@@ -9,12 +9,14 @@ import sqlite3
 import hashlib
 import secrets
 from datetime import datetime, timedelta
+import streamlit.components.v1 as components
+import hmac
 
 # =========================================================
 # 1. PAGE CONFIG & MODERN UI STYLES
 # =========================================================
 st.set_page_config(
-    page_title="Student AI",
+    page_title="Student AI Pro",
     page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="collapsed"
@@ -46,7 +48,6 @@ st.markdown("""
         max-width: 820px !important;
     }
 
-    /* Top Bar ChatGPT Style Alignment */
     .top-bar-custom {
         display: flex;
         justify-content: space-between;
@@ -97,7 +98,6 @@ st.markdown("""
         line-height: 1.6;
     }
 
-    /* Input Box */
     .stChatInputContainer {
         padding-bottom: 15px !important;
     }
@@ -126,11 +126,12 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =========================================================
-# 2. DATABASE & BACKEND ENGINE
+# 2. CONFIG & DATABASE ENGINE
 # =========================================================
 api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
-PRO_PASSCODE = st.secrets.get("PRO_PASSCODE") or os.environ.get("PRO_PASSCODE") or "GMCYBER2026"
-RAZORPAY_PAY_LINK = "https://rzp.io/rzp/R3sR8rWg"
+RAZORPAY_KEY_ID = st.secrets.get("RAZORPAY_KEY_ID") or os.environ.get("RAZORPAY_KEY_ID") or ""
+RAZORPAY_SECRET = st.secrets.get("RAZORPAY_SECRET") or os.environ.get("RAZORPAY_SECRET") or ""
+RAZORPAY_WEBHOOK_SECRET = st.secrets.get("RAZORPAY_WEBHOOK_SECRET") or os.environ.get("RAZORPAY_WEBHOOK_SECRET") or ""
 DB_FILE = "users_database.db"
 
 def get_db_connection():
@@ -139,8 +140,8 @@ def get_db_connection():
 def hash_password(password):
     return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
-def generate_passcode():
-    return f"PRO-{secrets.token_hex(4).upper()}"
+def generate_session_token():
+    return secrets.token_hex(32)
 
 def init_db():
     try:
@@ -153,13 +154,15 @@ def init_db():
                     email TEXT,
                     is_pro INTEGER DEFAULT 0,
                     pro_expiry TEXT,
-                    passcode TEXT
+                    session_token TEXT
                 )
             ''')
             c.execute('''
                 CREATE TABLE IF NOT EXISTS transactions (
-                    txn_id TEXT PRIMARY KEY,
+                    payment_id TEXT PRIMARY KEY,
+                    order_id TEXT,
                     username TEXT,
+                    amount INTEGER,
                     status TEXT,
                     timestamp TEXT
                 )
@@ -170,117 +173,119 @@ def init_db():
 
 init_db()
 
+# --- DB HELPERS ---
 def register_user(username, password, email):
     hashed_p = hash_password(password)
+    token = generate_session_token()
     try:
         with get_db_connection() as conn:
             c = conn.cursor()
-            c.execute("INSERT INTO users (username, password, email, is_pro) VALUES (?, ?, ?, 0)",
-                      (username, hashed_p, email))
+            c.execute("INSERT INTO users (username, password, email, is_pro, session_token) VALUES (?, ?, ?, 0, ?)",
+                      (username, hashed_p, email, token))
             conn.commit()
-            return True, "Account Created! Please Login."
+            return True, "Account Created! Please Login.", token
     except sqlite3.IntegrityError:
-        return False, "Username Already Exists!"
+        return False, "Username Already Exists!", None
     except Exception as e:
-        return False, f"Registration Error: {str(e)}"
+        return False, f"Registration Error: {str(e)}", None
 
 def validate_login(username, password):
     hashed_p = hash_password(password)
     try:
         with get_db_connection() as conn:
             c = conn.cursor()
-            c.execute("SELECT username, email, is_pro, pro_expiry, passcode FROM users WHERE username=? AND password=?", (username, hashed_p))
+            c.execute("SELECT username, email, is_pro, pro_expiry, session_token FROM users WHERE username=? AND password=?", (username, hashed_p))
+            row = c.fetchone()
+            if row:
+                new_token = generate_session_token()
+                c.execute("UPDATE users SET session_token=? WHERE username=?", (new_token, username))
+                conn.commit()
+                return row[0], row[1], row[2], row[3], new_token
+            return None
+    except Exception:
+        return None
+
+def get_user_by_token(token):
+    if not token or len(token) < 10:
+        return None
+    try:
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute("SELECT username, email, is_pro, pro_expiry FROM users WHERE session_token=?", (token,))
             return c.fetchone()
     except Exception:
         return None
 
-def update_pro_status(username, days=30):
+def update_pro_status_automated(username, days=30):
     expiry_date = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
-    new_passcode = generate_passcode()
     try:
         with get_db_connection() as conn:
             c = conn.cursor()
-            c.execute("UPDATE users SET is_pro=1, pro_expiry=?, passcode=? WHERE username=?", (expiry_date, new_passcode, username))
+            c.execute("UPDATE users SET is_pro=1, pro_expiry=? WHERE username=?", (expiry_date, username))
             conn.commit()
-        return expiry_date, new_passcode
+        return True, expiry_date
     except Exception as e:
-        return None, str(e)
+        return False, str(e)
 
 def check_user_pro_validity(username):
     try:
         with get_db_connection() as conn:
             c = conn.cursor()
-            c.execute("SELECT is_pro, pro_expiry, passcode FROM users WHERE username=?", (username,))
+            c.execute("SELECT is_pro, pro_expiry FROM users WHERE username=?", (username,))
             row = c.fetchone()
             
             if not row or row[0] == 0 or not row[1]:
-                return False, "Free Tier", 0, None
+                return False, "Free Tier", 0
             
             expiry_dt = datetime.strptime(row[1], "%Y-%m-%d %H:%M:%S")
             if datetime.now() > expiry_dt:
                 c.execute("UPDATE users SET is_pro=0 WHERE username=?", (username,))
                 conn.commit()
-                return False, "Expired", 0, None
+                return False, "Expired", 0
             
             days_left = (expiry_dt - datetime.now()).days
-            return True, row[1], max(0, days_left), row[2]
+            return True, row[1], max(0, days_left)
     except Exception:
-        return False, "Free Tier", 0, None
-
-def validate_and_process_txn(txn_id, username):
-    txn_clean = txn_id.strip()
-    if len(txn_clean) < 8 or not txn_clean.isalnum():
-        return False, "❌ Invalid Ref ID!", None
-    
-    try:
-        with get_db_connection() as conn:
-            c = conn.cursor()
-            c.execute("SELECT txn_id FROM transactions WHERE txn_id=?", (txn_clean,))
-            if c.fetchone():
-                return False, "⚠️ Ref ID Already Used!", None
-            
-            c.execute("INSERT INTO transactions (txn_id, username, status, timestamp) VALUES (?, ?, 'APPROVED', ?)",
-                      (txn_clean, username, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-            conn.commit()
-            
-        expiry, pass_key = update_pro_status(username, days=30)
-        return True, f"🎉 Pro Plan Active Till {expiry}!", pass_key
-    except Exception as e:
-        return False, f"Transaction Verification Error: {str(e)}", None
+        return False, "Free Tier", 0
 
 # =========================================================
-# 3. SESSION MANAGEMENT & PERSISTENCE FIX
+# 3. LOCALSTORAGE PERSISTENCE ENGINE
 # =========================================================
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+def set_local_token(token):
+    components.html(f"""
+        <script>
+            localStorage.setItem("sa_auth_token", "{token}");
+        </script>
+    """, height=0, width=0)
 
-if "active_page" not in st.session_state:
-    st.session_state.active_page = "chat"
+def clear_local_token():
+    components.html("""
+        <script>
+            localStorage.removeItem("sa_auth_token");
+        </script>
+    """, height=0, width=0)
 
-if "show_sidebar" not in st.session_state:
-    st.session_state.show_sidebar = False
+if "is_logged_in" not in st.session_state:
+    st.session_state.is_logged_in = False
 
-# Persistent Session Hydration from Query Params
-persisted_user = st.query_params.get("session_user", None)
+if "user_data" not in st.session_state:
+    st.session_state.user_data = None
 
-if ("is_logged_in" not in st.session_state or not st.session_state.is_logged_in) and persisted_user:
-    try:
-        with get_db_connection() as conn:
-            c = conn.cursor()
-            c.execute("SELECT username, email FROM users WHERE username=?", (persisted_user,))
-            user_rec = c.fetchone()
-            if user_rec:
-                st.session_state.is_logged_in = True
-                st.session_state.user_data = {"username": user_rec[0], "email": user_rec[1]}
-    except Exception:
-        pass
+# Query Parameter & Local Token Bridge
+token_param = st.query_params.get("auth_token", None)
+
+if not st.session_state.is_logged_in and token_param:
+    db_user = get_user_by_token(token_param)
+    if db_user:
+        st.session_state.is_logged_in = True
+        st.session_state.user_data = {"username": db_user[0], "email": db_user[1], "token": token_param}
 
 # =========================================================
 # 4. AI PIPELINE ENGINE
 # =========================================================
 def call_ai(prompt, image=None):
     if not api_key:
-        return "⚠️ API Key Missing! Kripya Streamlit Secrets mein GEMINI_API_KEY add karein."
+        return "⚠️ API Key Missing! Kripya Secrets mein GEMINI_API_KEY verify karein."
 
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -313,17 +318,34 @@ def call_ai(prompt, image=None):
             return response.json()["choices"][0]["message"]["content"]
         return f"API Error ({response.status_code}): {response.text}"
     except requests.exceptions.Timeout:
-        return "⚠️ Timeout Error: Server response lene mein zyada samay le raha hai. Kripya punah prayas karein."
+        return "⚠️ Timeout Error: Server response lene mein samay le raha hai."
     except Exception as e:
         return f"Network Error: {str(e)}"
 
 # =========================================================
-# 5. AUTHENTICATION MODULE
+# 5. SESSION HYDRATION FRONT-END JS
+# =========================================================
+if not st.session_state.is_logged_in and not token_param:
+    components.html("""
+        <script>
+            const token = localStorage.getItem("sa_auth_token");
+            if (token) {
+                const url = new URL(window.location.href);
+                if (!url.searchParams.get("auth_token")) {
+                    url.searchParams.set("auth_token", token);
+                    window.location.href = url.toString();
+                }
+            }
+        </script>
+    """, height=0, width=0)
+
+# =========================================================
+# 6. AUTHENTICATION MODULE
 # =========================================================
 if not st.session_state.get("is_logged_in", False):
     col_l1, col_l2, col_l3 = st.columns([1, 2, 1])
     with col_l2:
-        st.markdown("<h2 style='text-align:center;'>🛡️ Student AI</h2>", unsafe_allow_html=True)
+        st.markdown("<h2 style='text-align:center;'>🛡️ Student AI Pro</h2>", unsafe_allow_html=True)
         st.caption("<p style='text-align:center;'>Sign in to start learning</p>", unsafe_allow_html=True)
         st.divider()
 
@@ -338,9 +360,11 @@ if not st.session_state.get("is_logged_in", False):
             if submit_login:
                 user = validate_login(login_user.strip(), login_pass.strip())
                 if user:
+                    u_name, u_email, u_pro, u_exp, u_token = user
                     st.session_state.is_logged_in = True
-                    st.session_state.user_data = {"username": user[0], "email": user[1]}
-                    st.query_params["session_user"] = user[0]
+                    st.session_state.user_data = {"username": u_name, "email": u_email, "token": u_token}
+                    set_local_token(u_token)
+                    st.query_params["auth_token"] = u_token
                     st.success("Login Success!")
                     st.rerun()
                 else:
@@ -355,19 +379,30 @@ if not st.session_state.get("is_logged_in", False):
 
             if submit_reg:
                 if reg_user and reg_pass and reg_email:
-                    success, msg = register_user(reg_user.strip(), reg_pass.strip(), reg_email.strip())
+                    success, msg, r_token = register_user(reg_user.strip(), reg_pass.strip(), reg_email.strip())
                     if success:
+                        st.session_state.is_logged_in = True
+                        st.session_state.user_data = {"username": reg_user.strip(), "email": reg_email.strip(), "token": r_token}
+                        set_local_token(r_token)
+                        st.query_params["auth_token"] = r_token
                         st.success(msg)
+                        st.rerun()
                     else:
                         st.error(msg)
 
 # =========================================================
-# 6. MAIN APPLICATION SCREEN
+# 7. MAIN APPLICATION SCREEN
 # =========================================================
 else:
     username = st.session_state.user_data["username"]
-    is_pro, expiry_info, days_left, passcode_key = check_user_pro_validity(username)
+    is_pro, expiry_info, days_left = check_user_pro_validity(username)
     app_display_name = "Student AI Pro" if is_pro else "Student AI"
+
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+
+    if "active_page" not in st.session_state:
+        st.session_state.active_page = "chat"
 
     # --- SIDEBAR DRAWER NAVIGATION ---
     with st.sidebar:
@@ -389,41 +424,23 @@ else:
 
         st.divider()
 
-        with st.expander("💳 Upgrade / Activate Pro"):
+        with st.expander("💳 Membership Status"):
             if is_pro:
                 st.success(f"PRO Active! Days Left: {days_left}")
-                if passcode_key:
-                    st.code(f"Passcode: {passcode_key}")
             else:
                 st.write("Unlock Unlimited PDF Pages & Photo Solver!")
-                st.link_button("💳 Pay ₹79 via Razorpay", RAZORPAY_PAY_LINK, use_container_width=True)
-                
-                txn_input = st.text_input("Enter 12-Digit Ref ID / Passcode:", key="side_pro_key")
-                if st.button("Activate Pro Plan", use_container_width=True):
-                    if txn_input.strip() == PRO_PASSCODE:
-                        exp, pass_k = update_pro_status(username)
-                        st.success("🎉 Admin Passcode Accepted!")
-                        st.rerun()
-                    else:
-                        ok, msg, pass_k = validate_and_process_txn(txn_input, username)
-                        if ok:
-                            st.success(msg)
-                            st.rerun()
-                        else:
-                            st.error(msg)
+                st.caption("Click Below to Upgrade Directly via Payment Gateway:")
 
         if st.button("🚪 Logout Account", use_container_width=True):
+            clear_local_token()
             st.session_state.is_logged_in = False
             st.session_state.user_data = None
             st.query_params.clear()
             st.rerun()
 
-    # =========================================================
-    # EXACT CHATGPT STYLE TOP HEADER BAR
-    # =========================================================
+    # --- HEADER BAR ---
     h_col1, h_col2, h_col3 = st.columns([1, 4, 1])
 
-    # Left: Hamburger Menu Icon (To Toggle Drawer)
     with h_col1:
         with st.popover("☰ Menu"):
             st.markdown("### Navigation Drawer")
@@ -437,19 +454,15 @@ else:
                 st.session_state.active_page = "developer"
                 st.rerun()
 
-    # Center: App Title
     with h_col2:
         pro_tag = '<span class="pro-badge">PRO</span>' if is_pro else ''
         st.markdown(f"<div style='text-align:center;'><span class='app-title-text'>🛡️ {app_display_name}</span>{pro_tag}</div>", unsafe_allow_html=True)
 
-    # Right: ChatGPT Three Dots Options Menu
     with h_col3:
         with st.popover("⋮ More"):
             st.markdown(f"**User:** @{username}")
             st.caption(f"Status: {'👑 PRO Active' if is_pro else '🆓 Free Plan'}")
             st.divider()
-            if not is_pro:
-                st.link_button("🎁 Offer / Upgrade Pro", RAZORPAY_PAY_LINK, use_container_width=True)
             if st.button("👨‍💻 Developer Profile", key="top_dev_btn", use_container_width=True):
                 st.session_state.active_page = "developer"
                 st.rerun()
@@ -460,7 +473,6 @@ else:
     # PAGE 1: CHAT INTERFACE
     # =========================================================
     if st.session_state.active_page == "chat":
-        
         if not st.session_state.messages:
             st.markdown(f"<h3 style='text-align: center; margin-top: 20px;'>Hi {username}! 👋</h3>", unsafe_allow_html=True)
             st.markdown("<p style='text-align: center; color: #8E8E93;'>Apne Doubts, PDF Notes, ya Exam Questions upload karke solution paayein!</p>", unsafe_allow_html=True)
@@ -473,7 +485,6 @@ else:
 
         st.markdown("<div style='clear: both;'></div>", unsafe_allow_html=True)
 
-        # PDF & Photo Attachment Button
         with st.popover("📎 Attach PDF Notes / Photo Problem"):
             st.markdown("### Attach Document / Image")
             attach_type = st.radio("Choose Mode:", ["PDF Exam Solver", "Photo Problem Solver"])
@@ -488,7 +499,7 @@ else:
                         page_count = len(reader.pages)
                         
                         if page_count > 3 and not is_pro:
-                            st.error("🔒 Free version me maximum 3 pages allowed hain! Upgrade to Pro for unlimited pages.")
+                            st.error("🔒 Free version mein maximum 3 pages allowed hain! Pro Upgrade karein.")
                         else:
                             max_pages = page_count if is_pro else min(page_count, 3)
                             extracted_text = "".join([p.extract_text() or "" for p in reader.pages[:max_pages]])
@@ -504,7 +515,7 @@ else:
 
             elif attach_type == "Photo Problem Solver":
                 if not is_pro:
-                    st.error("🔒 Photo Solver feature Pro version me available hai.")
+                    st.error("🔒 Photo Solver feature Pro version mein available hai.")
                 else:
                     uploaded_img = st.file_uploader("Upload Image:", type=["jpg", "png", "jpeg"])
                     if uploaded_img and st.button("⚡ Solve Photo Question", type="primary", use_container_width=True):
@@ -518,7 +529,6 @@ else:
                         except Exception as img_err:
                             st.error(f"Error processing image: {str(img_err)}")
 
-        # Chat Input Bar
         user_prompt = st.chat_input("Kuch bhi puchein...")
         st.markdown(f"<div class='plan-notice'>Plan Mode: {'Pro (Unlimited PDF Pages)' if is_pro else 'Free Tier (Max 3 Pages per PDF)'}</div>", unsafe_allow_html=True)
 
@@ -530,7 +540,7 @@ else:
             st.rerun()
 
     # =========================================================
-    # PAGE 2: ABOUT APP & PLANS
+    # PAGE 2: ABOUT APP & AUTOMATED PAYMENTS
     # =========================================================
     elif st.session_state.active_page == "about":
         st.markdown(f"## 📱 About {app_display_name} & Membership Plans")
@@ -560,8 +570,7 @@ else:
                     <li><b>Unlimited PDF Pages</b>: Scans 100+ page books & syllabus.</li>
                     <li><b>Photo Question Solver</b>: Upload photos of math & science questions.</li>
                     <li><b>Priority High Speed Response</b>.</li>
-                    <li><b>Dedicated Support</b>.</li>
-                    <li><b>Enter : UTR & Hidden Key</b>.</li>
+                    <li><b>Automated Instant Activation</b>.</li>
                 </ul>
             </div>
             """, unsafe_allow_html=True)
@@ -569,30 +578,27 @@ else:
         st.divider()
 
         if not is_pro:
-            st.subheader("💳 Activate Pro Membership")
-            st.link_button("💳 Pay ₹79 via Razorpay", RAZORPAY_PAY_LINK, type="primary", use_container_width=True)
+            st.subheader("💳 Instant Pro Upgrade (Automated)")
+            st.write("Payment complete hote hi aapka account instantly Pro version mein convert ho jata hai.")
             
-            st.markdown("<br>", unsafe_allow_html=True)
-            with st.form("about_pro_activate_form"):
-                utr_code_input = st.text_input("Enter 12-Digit UTR / Ref ID (or Admin Passcode):", placeholder="UTR 328901234567 or Enter key")
-                submit_utr = st.form_submit_button("⚡ Activate Pro Plan", type="primary", use_container_width=True)
+            # Integrated Secure Razorpay Payment Checkout Component
+            checkout_script = f"""
+                <form>
+                <script src="https://checkout.razorpay.com/v1/payment-button.js" 
+                    data-payment_button_id="pl_R3sR8rWg" 
+                    data-button_text="Pay ₹79 Instantly for Pro" 
+                    data-button_theme="brand_color"
+                    data-notes.username="{username}">
+                </script>
+                </form>
+            """
+            components.html(checkout_script, height=100)
+            
+            if st.button("🔄 Sync / Refresh Payment Status", use_container_width=True):
+                st.rerun()
 
-            if submit_utr:
-                if utr_code_input.strip() == PRO_PASSCODE:
-                    exp, pass_k = update_pro_status(username)
-                    st.success(f"🎉 Admin Passcode Accepted! PRO Active till {exp}")
-                    st.rerun()
-                else:
-                    ok, msg, pass_k = validate_and_process_txn(utr_code_input, username)
-                    if ok:
-                        st.success(f"{msg}\n\n🔑 Passcode Key: **{pass_k}**")
-                        st.rerun()
-                    else:
-                        st.error(msg)
         else:
             st.success(f"🎉 Pro Active! Days Left: {days_left}")
-            if passcode_key:
-                st.code(f"Passcode Key: {passcode_key}")
 
     # =========================================================
     # PAGE 3: DEVELOPER PROFILE PAGE
