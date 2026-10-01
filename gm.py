@@ -12,8 +12,7 @@ import hmac
 import secrets
 import json
 from datetime import datetime, timedelta
-
-# pip install streamlit pypdf pillow requests streamlit-cookies-controller
+from streamlit_cookies_controller import CookieController
 
 # =========================================================
 # 1. PAGE CONFIG & UI STYLES
@@ -46,7 +45,7 @@ st.markdown("""
     .chat-user { background-color:#212121; color:#FFF; padding:12px 18px; border-radius:22px; margin-bottom:14px; float:right; clear:both; max-width:82%; font-size:15px; line-height:1.5; }
     .chat-ai { color:#ECECF1; padding:4px 0px 14px 0px; margin-bottom:14px; float:left; clear:both; width:100%; font-size:15px; line-height:1.6; }
     .stChatInput > div { background-color:#171717 !important; border:1px solid #2F2F2F !important; border-radius:28px !important; }
-    .plan-notice { font-size:11px; color:#888; text-align:center; margin-top:4px; }
+    .plan-notice { font-size:12px; color:#FFA500; text-align:center; margin-top:6px; font-weight:600; }
     .feature-card { background-color:#121212; border:1px solid #222; padding:20px; border-radius:12px; margin-bottom:15px; }
     </style>
 """, unsafe_allow_html=True)
@@ -57,15 +56,15 @@ st.markdown("""
 api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
 PRO_PASSCODE = st.secrets.get("PRO_PASSCODE") or os.environ.get("PRO_PASSCODE") or "GMCYBER2026"
 
-# Razorpay REAL credentials (secrets.toml me daalo, hardcode mat karo)
 RAZORPAY_KEY_ID = st.secrets.get("RAZORPAY_KEY_ID") or os.environ.get("RAZORPAY_KEY_ID", "")
 RAZORPAY_KEY_SECRET = st.secrets.get("RAZORPAY_KEY_SECRET") or os.environ.get("RAZORPAY_KEY_SECRET", "")
 PRO_PRICE_PAISE = 7900  # ₹79
 
 DB_FILE = "users_database.db"
+MAX_FREE_QUESTIONS = 5
 
 # =========================================================
-# 3. DATABASE
+# 3. DATABASE & USAGE TRACKING
 # =========================================================
 def get_db_connection():
     return sqlite3.connect(DB_FILE, timeout=10)
@@ -84,13 +83,15 @@ def init_db():
             is_pro INTEGER DEFAULT 0, pro_expiry TEXT, passcode TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS transactions (
             txn_id TEXT PRIMARY KEY, username TEXT, status TEXT, timestamp TEXT)''')
-        # Secure session tokens (auto-login fix)
         c.execute('''CREATE TABLE IF NOT EXISTS sessions (
             token TEXT PRIMARY KEY, username TEXT, created_at TEXT)''')
-        # Razorpay orders (auto-payment verification)
         c.execute('''CREATE TABLE IF NOT EXISTS payments (
             order_id TEXT PRIMARY KEY, username TEXT, payment_id TEXT,
             signature TEXT, status TEXT, timestamp TEXT)''')
+        # Questions usage tracking table
+        c.execute('''CREATE TABLE IF NOT EXISTS usage_tracker (
+            username TEXT, usage_date TEXT, count INTEGER DEFAULT 0,
+            PRIMARY KEY (username, usage_date))''')
         conn.commit()
 
 init_db()
@@ -118,7 +119,6 @@ def validate_login(username, password):
     except Exception:
         return None
 
-# --- SESSION TOKEN (PERSISTENT LOGIN FIX) ---
 def create_session_token(username):
     token = secrets.token_urlsafe(32)
     with get_db_connection() as conn:
@@ -177,11 +177,27 @@ def check_user_pro_validity(username):
     except Exception:
         return False, "Free Tier", 0, None
 
+# --- DAILY QUESTION COUNTER LOGIC ---
+def get_today_question_count(username):
+    today = datetime.now().strftime("%Y-%m-%d")
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        c.execute("SELECT count FROM usage_tracker WHERE username=? AND usage_date=?", (username, today))
+        row = c.fetchone()
+        return row[0] if row else 0
+
+def increment_question_count(username):
+    today = datetime.now().strftime("%Y-%m-%d")
+    current = get_today_question_count(username)
+    with get_db_connection() as conn:
+        conn.execute("INSERT OR REPLACE INTO usage_tracker (username, usage_date, count) VALUES (?, ?, ?)",
+                     (username, today, current + 1))
+        conn.commit()
+
 # =========================================================
-# 4. RAZORPAY AUTO PAYMENT VERIFICATION (FAKE UTR FIX)
+# 4. RAZORPAY PAYMENT SYSTEM
 # =========================================================
 def create_razorpay_order(username):
-    """Server-side order create karo (amount server se aata hai, client se nahi)."""
     try:
         resp = requests.post(
             "https://api.razorpay.com/v1/orders",
@@ -201,7 +217,6 @@ def create_razorpay_order(username):
         return None
 
 def verify_razorpay_signature(order_id, payment_id, signature):
-    """Razorpay ka official HMAC-SHA256 verification — fake ID pass nahi hogi."""
     if not (RAZORPAY_KEY_SECRET and order_id and payment_id and signature):
         return False
     expected = hmac.new(
@@ -211,28 +226,27 @@ def verify_razorpay_signature(order_id, payment_id, signature):
     return hmac.compare_digest(expected, signature)
 
 def process_verified_payment(order_id, payment_id, signature, username):
-    """Signature verify karke DB me record + Pro activate."""
     if not verify_razorpay_signature(order_id, payment_id, signature):
-        return False, "❌ Payment signature verification FAILED! (Fake ID detect ho gayi)"
+        return False, "❌ Payment signature verification FAILED!", None
     with get_db_connection() as conn:
         c = conn.cursor()
-        # Double-spend check: ek order sirf ek baar activate ho
         c.execute("SELECT status FROM payments WHERE order_id=?", (order_id,))
         row = c.fetchone()
         if row and row[0] == "PAID":
-            return False, "⚠️ Ye payment already use ho chuka hai!"
-        # Razorpay API se cross-check (optional but strong)
+            return False, "⚠️ Ye payment pehle se use ho chuka hai!", None
+        
         try:
             pr = requests.get(f"https://api.razorpay.com/v1/payments/{payment_id}",
                               auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET), timeout=30)
             if pr.status_code == 200:
                 pdata = pr.json()
                 if pdata.get("status") != "captured" or pdata.get("order_id") != order_id:
-                    return False, "❌ Payment not captured at Razorpay!"
+                    return False, "❌ Payment capture nahi hua!", None
             else:
-                return False, "❌ Razorpay se payment verify nahi hui."
+                return False, "❌ Razorpay verification failed.", None
         except Exception as e:
-            return False, f"❌ Verification Error: {str(e)}"
+            return False, f"❌ Error: {str(e)}", None
+
         conn.execute("UPDATE payments SET payment_id=?, signature=?, status='PAID' WHERE order_id=?",
                      (payment_id, signature, order_id))
         conn.commit()
@@ -240,7 +254,6 @@ def process_verified_payment(order_id, payment_id, signature, username):
     return True, f"🎉 Payment Verified! Pro Active Till {expiry}!", pass_key
 
 def render_razorpay_checkout(order, username, app_url):
-    """Razorpay Checkout popup — success par signed params ke saath app wapas redirect."""
     checkout_html = f"""
     <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
     <div id="rzp-status" style="color:#fff;font-family:sans-serif;text-align:center;">Opening Razorpay Secure Checkout...</div>
@@ -272,10 +285,8 @@ def render_razorpay_checkout(order, username, app_url):
     components.html(checkout_html, height=150)
 
 # =========================================================
-# 5. PERSISTENT SESSION VIA COOKIE (LOGIN FIX)
+# 5. SESSION & APP URL HELPERS
 # =========================================================
-from streamlit_cookies_controller import CookieController
-
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "active_page" not in st.session_state:
@@ -285,14 +296,7 @@ cookies = CookieController()
 SESSION_COOKIE = "student_ai_session"
 
 def get_app_url():
-    """Current app URL nikaalo (query params hata ke)."""
     try:
-        from streamlit.web.server import get_url
-    except Exception:
-        pass
-    # Simple approach: headers se
-    try:
-        import streamlit.web.server.websocket_headers as wsh
         headers = st.context.headers
         host = headers.get("Host", "localhost:8501")
         proto = "https" if "streamlit.app" in host or headers.get("X-Forwarded-Proto") == "https" else "http"
@@ -300,7 +304,6 @@ def get_app_url():
     except Exception:
         return "http://localhost:8501/"
 
-# Auto-login from cookie (app band/reopen — bhi kaam karega)
 if not st.session_state.get("is_logged_in", False):
     cookie_token = cookies.get(SESSION_COOKIE)
     user_rec = get_user_from_token(cookie_token)
@@ -309,7 +312,6 @@ if not st.session_state.get("is_logged_in", False):
         st.session_state.user_data = {"username": user_rec[0], "email": user_rec[1]}
         st.rerun()
 
-# Razorpay redirect handle (payment ke baad wapas aaye to)
 rzp_payment = st.query_params.get("rzp_payment")
 rzp_order = st.query_params.get("rzp_order")
 rzp_sig = st.query_params.get("rzp_sig")
@@ -326,7 +328,7 @@ if rzp_payment and rzp_order and rzp_sig:
 # =========================================================
 def call_ai(prompt, image=None):
     if not api_key:
-        return "⚠️ API Key Missing! Streamlit Secrets mein GEMINI_API_KEY add karein."
+        return "⚠️ API Key Missing! Secrets mein GEMINI_API_KEY set karein."
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     content_payload = [{"type": "text", "text": prompt}]
     if image:
@@ -373,7 +375,7 @@ if not st.session_state.get("is_logged_in", False):
                     st.session_state.is_logged_in = True
                     st.session_state.user_data = {"username": user[0], "email": user[1]}
                     token = create_session_token(user[0])
-                    cookies.set(SESSION_COOKIE, token, max_age=60*60*24*365)  # 1 saal tak logged-in
+                    cookies.set(SESSION_COOKIE, token, max_age=60*60*24*365)
                     st.success("Login Success!")
                     st.rerun()
                 else:
@@ -391,26 +393,24 @@ if not st.session_state.get("is_logged_in", False):
                     (st.success if success else st.error)(msg)
                 else:
                     st.error("Sabhi fields bharein!")
-
     st.stop()
 
 # =========================================================
-# 8. MAIN APP
+# 8. MAIN APP DASHBOARD
 # =========================================================
 username = st.session_state.user_data["username"]
 is_pro, expiry_info, days_left, passcode_key = check_user_pro_validity(username)
 app_display_name = "Student AI Pro" if is_pro else "Student AI"
 
-# Keep-alive: active user ke browser ko 50 sec me ek ping (session idle-expire fix)
-try:
-    from streamlit_autorefresh import st_autorefresh
-    st_autorefresh(interval=50000, limit=None, key="keepalive")
-except ImportError:
-    pass  # pip install streamlit-autorefresh
+# Check usage counts
+used_questions = get_today_question_count(username)
+remaining_questions = max(0, MAX_FREE_QUESTIONS - used_questions)
 
 with st.sidebar:
     st.markdown(f"### 🛡️ {app_display_name}")
     st.caption(f"Logged as **@{username}** ({'👑 PRO' if is_pro else '🆓 Free Plan'})")
+    if not is_pro:
+        st.info(f"📊 **Today's Free Usage**: {used_questions}/{MAX_FREE_QUESTIONS} Questions Used")
     st.divider()
 
     if st.button("💬 Chat AI Interface", use_container_width=True):
@@ -421,33 +421,33 @@ with st.sidebar:
         st.session_state.active_page = "developer"; st.rerun()
     st.divider()
 
-    with st.expander("💳 Upgrade / Activate Pro"):
+    with st.expander("💳 Upgrade / Activate Pro", expanded=not is_pro):
         if is_pro:
             st.success(f"PRO Active! Days Left: {days_left}")
             if passcode_key:
                 st.code(f"Passcode: {passcode_key}")
         else:
-            st.write("Unlock Unlimited PDF Pages & Photo Solver!")
+            st.write("🔥 **Unlock Unlimited Direct Questions, Unlimited PDF Pages & Photo Solver!**")
             if RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
                 if st.button("💳 Pay ₹79 Securely (Auto-Verify)", type="primary", use_container_width=True):
                     order = create_razorpay_order(username)
                     if order:
                         st.session_state.rzp_order = order
                     else:
-                        st.error("Order creation failed. Razorpay keys check karein.")
+                        st.error("Order creation failed. Check Razorpay credentials.")
                 if st.session_state.get("rzp_order"):
                     render_razorpay_checkout(st.session_state.rzp_order, username, get_app_url())
             else:
-                st.error("Razorpay keys missing in secrets!")
-            # Admin passcode fallback
-            admin_code = st.text_input("Admin Passcode (special):", key="side_admin_key")
-            if st.button("Activate via Admin Passcode", use_container_width=True):
+                st.warning("Razorpay keys missing in secrets!")
+            
+            admin_code = st.text_input("Admin Passcode:", key="side_admin_key")
+            if st.button("Activate via Passcode", use_container_width=True):
                 if admin_code.strip() == PRO_PASSCODE:
                     exp, pass_k = update_pro_status(username)
-                    st.success("🎉 Admin Passcode Accepted!")
+                    st.success("🎉 Passcode Accepted! PRO Activated.")
                     st.rerun()
                 else:
-                    st.error("❌ Invalid Admin Passcode!")
+                    st.error("❌ Invalid Passcode!")
 
     if st.button("🚪 Logout Account", use_container_width=True):
         delete_session_token(cookies.get(SESSION_COOKIE))
@@ -456,7 +456,6 @@ with st.sidebar:
         st.session_state.user_data = None
         st.rerun()
 
-# Payment result banner (redirect ke baad)
 if st.session_state.get("rzp_result"):
     ok, msg, pk = st.session_state.rzp_result
     (st.success if ok else st.error)(msg)
@@ -513,7 +512,7 @@ if st.session_state.active_page == "chat":
                     reader = PdfReader(io.BytesIO(uploaded_pdf.getvalue()))
                     page_count = len(reader.pages)
                     if page_count > 3 and not is_pro:
-                        st.error("🔒 Free version me maximum 3 pages allowed hain! Upgrade to Pro for unlimited pages.")
+                        st.error("🔒 Free version mein maximum 3 pages allowed hain! Pro lein unlimited pages ke liye.")
                     else:
                         max_pages = page_count if is_pro else min(page_count, 3)
                         extracted_text = "".join([p.extract_text() or "" for p in reader.pages[:max_pages]])
@@ -528,7 +527,7 @@ if st.session_state.active_page == "chat":
 
         elif attach_type == "Photo Problem Solver":
             if not is_pro:
-                st.error("🔒 Photo Solver feature Pro version me available hai.")
+                st.error("🔒 Photo Solver feature strictly Pro version me available hai!")
             else:
                 uploaded_img = st.file_uploader("Upload Image:", type=["jpg", "png", "jpeg"])
                 if uploaded_img and st.button("⚡ Solve Photo Question", type="primary", use_container_width=True):
@@ -542,15 +541,41 @@ if st.session_state.active_page == "chat":
                     except Exception as img_err:
                         st.error(f"Error processing image: {str(img_err)}")
 
-    user_prompt = st.chat_input("Kuch bhi puchein...")
-    st.markdown(f"<div class='plan-notice'>Plan Mode: {'Pro (Unlimited PDF Pages)' if is_pro else 'Free Tier (Max 3 Pages per PDF)'}</div>", unsafe_allow_html=True)
+    # FREEMIUM LOCK LOGIC IMPLEMENTATION
+    if not is_pro and used_questions >= MAX_FREE_QUESTIONS:
+        st.error("🚨 **Daily Limit Reached!** Aapne aaj ke 5 Free Questions complete kar liye hain.")
+        st.markdown("""
+        <div style="background-color: #1E1010; border: 2px solid #FF4D4D; border-radius: 12px; padding: 20px; text-align: center; margin-top: 10px; margin-bottom: 25px;">
+            <h2 style="color: #FF4D4D; margin-top: 0;">🔒 Upgrade to Pro to Continue</h2>
+            <p style="color: #CCCCCC; font-size: 15px;">Aaj ki daily limit (5 Questions) poori ho chuki hai. Unlimited questions, Photo Question Solver, aur full PDF scanning ke liye abhi <b>Pro Upgrade</b> karein!</p>
+            <h3 style="color: #FFD700;">Kewal ₹79 / Month</h3>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        if RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
+            if st.button("👑 Unlock Unlimited Questions (Pay ₹79)", type="primary", use_container_width=True):
+                order = create_razorpay_order(username)
+                if order:
+                    st.session_state.rzp_order = order
+                else:
+                    st.error("Order create nahi ho saka.")
+            if st.session_state.get("rzp_order"):
+                render_razorpay_checkout(st.session_state.rzp_order, username, get_app_url())
+        else:
+            st.info("Payment setup karne ke liye secrets.toml mein Razorpay Keys dalein.")
+    else:
+        user_prompt = st.chat_input("Kuch bhi puchein...")
+        status_text = "Plan Mode: Pro (Unlimited Access)" if is_pro else f"Plan Mode: Free Tier ({remaining_questions} Questions Left Today)"
+        st.markdown(f"<div class='plan-notice'>{status_text}</div>", unsafe_allow_html=True)
 
-    if user_prompt:
-        st.session_state.messages.append({"role": "user", "content": user_prompt})
-        with st.spinner("Thinking..."):
-            res = call_ai(user_prompt)
-            st.session_state.messages.append({"role": "assistant", "content": res})
-        st.rerun()
+        if user_prompt:
+            st.session_state.messages.append({"role": "user", "content": user_prompt})
+            if not is_pro:
+                increment_question_count(username)
+            with st.spinner("Thinking..."):
+                res = call_ai(user_prompt)
+                st.session_state.messages.append({"role": "assistant", "content": res})
+            st.rerun()
 
 # --- PAGE 2: ABOUT ---
 elif st.session_state.active_page == "about":
@@ -564,9 +589,9 @@ elif st.session_state.active_page == "about":
         <div class="feature-card">
             <h3>🆓 Free Version (Student AI)</h3>
             <ul>
-                <li><b>Unlimited Text Chat</b>: Ask doubts anytime.</li>
+                <li><b>Daily Limit</b>: Maximum <b>5 Direct Questions/Day</b>.</li>
                 <li><b>PDF Page Limit</b>: Strictly <b>3 Pages</b> per document.</li>
-                <li><b>Standard AI Speed</b>.</li>
+                <li><b>Standard Speed</b>.</li>
                 <li><b>Photo Solver</b>: Not Included.</li>
             </ul>
         </div>
@@ -576,10 +601,10 @@ elif st.session_state.active_page == "about":
         <div class="feature-card" style="border: 1px solid #38BDF8;">
             <h3 style="color: #38BDF8;">👑 Pro Version (Student AI Pro)</h3>
             <ul>
-                <li><b>Unlimited PDF Pages</b>: Scans 100+ page books & syllabus.</li>
-                <li><b>Photo Question Solver</b>: Upload photos of math & science questions.</li>
-                <li><b>Priority High Speed Response</b>.</li>
-                <li><b>Dedicated Support</b>.</li>
+                <li><b>Unlimited Questions</b>: Koi daily limit nahi.</li>
+                <li><b>Unlimited PDF Scanning</b>: Complete books & syllabus extract karein.</li>
+                <li><b>Photo Question Solver</b>: Math/Science photos ka instant answer.</li>
+                <li><b>Fast Response Speed</b>.</li>
                 <li><b>Secure Auto-Verified Payment</b>.</li>
             </ul>
         </div>
@@ -588,7 +613,7 @@ elif st.session_state.active_page == "about":
 
     if not is_pro:
         st.subheader("💳 Activate Pro Membership (Auto-Verified)")
-        st.info("✅ Payment Razorpay se automatically verify hoti hai — koi fake UTR kaam nahi karega.")
+        st.info("✅ Payment Razorpay se automatically verify hoti hai.")
         if RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
             if st.button("💳 Pay ₹79 Securely Now", type="primary", use_container_width=True):
                 order = create_razorpay_order(username)
@@ -600,6 +625,7 @@ elif st.session_state.active_page == "about":
                 render_razorpay_checkout(st.session_state.rzp_order, username, get_app_url())
         else:
             st.error("Razorpay keys missing in secrets!")
+        
         admin_code = st.text_input("Admin Passcode (special):", key="about_admin_key")
         if st.button("⚡ Activate via Admin Passcode", use_container_width=True):
             if admin_code.strip() == PRO_PASSCODE:
@@ -634,6 +660,6 @@ elif st.session_state.active_page == "developer":
 
         - **Project Name**: Student AI / Student AI Pro
         - **Mission**: Making exam preparation and study note extraction effortless using AI models.
-        - **Tech Stack**: Python, Streamlit, OpenRouter API, SQLite3, Razorpay, Custom Dark UI.
+        - **Tech Stack**: Python, Streamlit, OpenRouter API, SQLite3, Razorpay Integration.
         """)
         st.link_button("💬 Contact Developer on WhatsApp", "https://wa.me/910000000000", use_container_width=True)
