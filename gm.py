@@ -403,8 +403,13 @@ if st.session_state.active_page == "chat":
             
             st.rerun()
 
+# =========================================================
+# (Apne pure code mein 'Page 2: My Plan & Upgrade' wala section dhoondein)
+# Aur use is corrected code se replace kar dein.
+# =========================================================
+
 # ---------------------------------------------------------
-# Page 2: My Plan & Upgrade (Manual Telegram Process)
+# Page 2: My Plan & Upgrade (Manual Telegram Process) - Corrected
 # ---------------------------------------------------------
 elif st.session_state.active_page == "plan":
     st.markdown("### 📚 Account Subscription")
@@ -445,4 +450,52 @@ elif st.session_state.active_page == "plan":
     st.markdown("#### 🚀 Upgrade to PRO Plan (₹79 / 30 Days)")
     st.caption("Automatic payment band kar diya gaya hai. Ab aap niche diye process se manual payment karke account active kara sakte hain.")
 
-    pay_col1, pay_col2 = st.columns([1
+    # --- YAHAN THI ERROR --- Fixed line below:
+    pay_col1, pay_col2 = st.columns([1.2, 1])
+
+    with pay_col1:
+        st.markdown('<div class="feature-card">', unsafe_allow_html=True)
+        st.markdown("💎 **PRO Plan Benefits:**")
+        st.markdown("- ✅ Unlimited Daily Questions (No Limit)")
+        st.markdown("- ✅ Faster Response AI Model")
+        st.markdown("- ✅ Image & PDF Upload Support")
+        st.markdown("- ✅ Priority Support via Telegram")
+        st.markdown(f"**Price:** ₹79 for 30 Days")
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        st.markdown("#### 📝 Payment & Activation Process:")
+        st.markdown(f"""
+            <div class="payment-instruction">
+                1️⃣ <span class="step-number">1</span> Saamne diye gaye **UPI QR Code** ko scan karein.<br>
+                2️⃣ <span class="step-number">2</span> Kisi bhi UPI app (GPay, PhonePe, Paytm) se **₹79** pay karein.<br>
+                3️⃣ <span class="step-number">3</span> Payment successful hone ke baad uska **Screenshot** le lein.<br>
+                4️⃣ <span class="step-number">4</span> Niche diye button par click karke mere **Telegram** par Screenshot aur apna **Username** (`{username}`) send karein.<br>
+                5️⃣ <span class="step-number">5</span> Main verification ke baad aapko 10-digit ka **Passcode** dunga.<br>
+                6️⃣ <span class="step-number">6</span> Us Passcode ko upar wale box mein dalkar **Activate** karein.
+            </div>
+        """, unsafe_allow_html=True)
+        st.write("")
+        st.link_button("📤 Send Screenshot on Telegram", TELEGRAM_LINK, type="primary", use_container_width=True)
+
+    with pay_col2:
+        st.markdown("<p style='text-align:center; font-weight:bold;'>Scan to Pay ₹79</p>", unsafe_allow_html=True)
+        if os.path.exists(QR_IMAGE_PATH):
+            try:
+                qr_img = Image.open(QR_IMAGE_PATH)
+                # Resize image slightly to fit better if needed
+                st.image(qr_img, use_container_width=True)
+                st.caption("<p style='text-align:center;'>Scan with GPay, PhonePe, Paytm or any UPI app</p>", unsafe_allow_html=True)
+            except Exception as pay_err:
+                st.error(f"Error loading QR Image: {str(pay_err)}")
+        else:
+            st.error(f"⚠️ Payment QR Image (`{QR_IMAGE_PATH}`) GitHub par nahi mili! Kripya upload karein.")
+
+    st.divider()
+    st.markdown("#### ⚖️ Policy & Terms")
+    with st.expander("Payment & Refund Policy"):
+        st.write("""
+            * **Manual Activation:** Payment screenshot received hone ke baad verification mein 10 minute se 4 ghante tak lag sakte hain. 
+            * **Passcode:** Admin dwara diya gaya Passcode sirf ek baar use ho sakta hai. Use kisi aur ke saath share na karein.
+            * **No Refund:**PRO Plan ki digital delivery ke baad kisi bhi situation mein refund provide nahi kiya jayega.
+            * **Support:** Agar payment ke baad 12 ghante tak passcode nahi milta, toh fir se Telegram par message karein.
+        """)
