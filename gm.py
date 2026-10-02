@@ -53,14 +53,13 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =========================================================
-# 2. CONFIG & SECRETS (Razorpay keys removed)
+# 2. CONFIG & SECRETS
 # =========================================================
 api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
 PRO_PASSCODE = st.secrets.get("PRO_PASSCODE") or os.environ.get("PRO_PASSCODE") or "GMCYBER2026"
 
-# Telegram contact link
 TELEGRAM_LINK = "http://t.me/pintu9389"
-QR_IMAGE_PATH = "payment_qr.png" # GitHub par upload ki hui image ka naam
+QR_IMAGE_PATH = "payment_qr.png"
 
 DB_FILE = "users_database.db"
 MAX_FREE_QUESTIONS = 5
@@ -74,10 +73,6 @@ def get_db_connection():
 def hash_password(password):
     return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
-def generate_passcode():
-    """Generates a unique passcode to give to the user."""
-    return f"PRO-{secrets.token_hex(4).upper()}"
-
 def init_db():
     with get_db_connection() as conn:
         c = conn.cursor()
@@ -86,7 +81,6 @@ def init_db():
             is_pro INTEGER DEFAULT 0, pro_expiry TEXT, passcode TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS sessions (
             token TEXT PRIMARY KEY, username TEXT, created_at TEXT)''')
-        # Questions usage tracking table
         c.execute('''CREATE TABLE IF NOT EXISTS usage_tracker (
             username TEXT, usage_date TEXT, count INTEGER DEFAULT 0,
             PRIMARY KEY (username, usage_date))''')
@@ -149,10 +143,8 @@ def delete_session_token(token):
         pass
 
 def activate_pro_manual(username, passcode_entered, days=30):
-    """Activates PRO status if the user enters the master passcode."""
     if passcode_entered == PRO_PASSCODE:
         expiry_date = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
-        # We use a special marker for manually activated accounts
         with get_db_connection() as conn:
             conn.execute("UPDATE users SET is_pro=1, pro_expiry=?, passcode='MANUAL_ACTIVATE' WHERE username=?",
                          (expiry_date, username))
@@ -178,7 +170,6 @@ def check_user_pro_validity(username):
     except Exception:
         return False, "Free Tier", 0
 
-# --- DAILY QUESTION COUNTER LOGIC ---
 def get_today_question_count(username):
     today = datetime.now().strftime("%Y-%m-%d")
     with get_db_connection() as conn:
@@ -293,21 +284,20 @@ username = st.session_state.user_data["username"]
 is_pro, expiry_info, days_left = check_user_pro_validity(username)
 app_display_name = "Student AI Pro" if is_pro else "Student AI"
 
-# Check usage counts
 used_questions = get_today_question_count(username)
 remaining_free = MAX_FREE_QUESTIONS - used_questions
 
-# --- SIDEBAR NAV ---
+# --- SIDEBAR NAV (FIXED BUTTON TYPES) ---
 with st.sidebar:
     st.markdown(f"### 🛡️ {app_display_name}")
     st.caption(f"Welcome, {username}")
     st.divider()
     
-    if st.button("💬 Chat Assistant", use_container_width=True, type="secondary" if st.session_state.active_page=="chat" else "ghost"):
+    if st.button("💬 Chat Assistant", use_container_width=True, type="primary" if st.session_state.active_page=="chat" else "secondary"):
         st.session_state.active_page = "chat"
         st.rerun()
         
-    if st.button("📚 My Plan & Upgrade", use_container_width=True, type="secondary" if st.session_state.active_page=="plan" else "ghost"):
+    if st.button("📚 My Plan & Upgrade", use_container_width=True, type="primary" if st.session_state.active_page=="plan" else "secondary"):
         st.session_state.active_page = "plan"
         st.rerun()
         
@@ -322,8 +312,6 @@ with st.sidebar:
 # =========================================================
 # 8. PAGE ROUTING
 # =========================================================
-
-# --- TOP BAR ---
 st.markdown(f"""
     <div class="top-bar-custom">
         <div class="app-title-text">{app_display_name}{'<span class="pro-badge">PRO</span>' if is_pro else ''}</div>
@@ -335,19 +323,13 @@ st.markdown(f"""
 # Page 1: Chat Assistant
 # ---------------------------------------------------------
 if st.session_state.active_page == "chat":
-    # Display message history
     for message in st.session_state.messages:
         div_class = "chat-user" if message["role"] == "user" else "chat-ai"
         st.markdown(f'<div class="{div_class}">{message["content"]}</div>', unsafe_allow_html=True)
 
-    # Free plan notice
     if not is_pro:
         st.markdown(f'<div class="plan-notice">Free Tier: {remaining_free} questions left today</div>', unsafe_allow_html=True)
 
-    # Chat Input Zone
-    st.markdown('<div class="chat-input-spacer"></div>', unsafe_allow_html=True)
-    
-    # Check if questions available
     can_ask = is_pro or remaining_free > 0
     
     if not can_ask:
@@ -356,65 +338,51 @@ if st.session_state.active_page == "chat":
             st.session_state.active_page = "plan"
             st.rerun()
     else:
-        # File uploader outside form for better UX
         uploaded_file = st.file_uploader("📁 Upload image or PDF (Optional)", type=["png", "jpg", "jpeg", "pdf"], label_visibility="collapsed")
         
-        # User input form
         with st.form(key="chat_input_form", clear_on_submit=True):
             cols = st.columns([8, 2])
             user_input = cols[0].text_input("Ask Student AI...", placeholder="Type question or upload file...", label_visibility="collapsed")
             submit_chat = cols[1].form_submit_button("Send", type="primary", use_container_width=True)
 
         if submit_chat and (user_input or uploaded_file):
-            # Record user message
             content_text = user_input if user_input else "Uploaded a file."
             st.session_state.messages.append({"role": "user", "content": content_text})
             
-            # Show processing
             with st.spinner("Student AI is thinking..."):
                 final_prompt = user_input
                 ai_image = None
                 
-                # Handle file uploader
                 if uploaded_file:
                     if uploaded_file.type == "application/pdf":
                         try:
                             reader = PdfReader(uploaded_file)
                             pdf_text = ""
-                            for page in reader.pages[:3]: # limit to first 3 pages
+                            for page in reader.pages[:3]:
                                 pdf_text += page.extract_text()
                             final_prompt = f"Context from PDF:\n{pdf_text}\n\nUser Question: {user_input}"
                         except Exception as e:
                             final_prompt = f"Error reading PDF: {str(e)}. Attempted Question: {user_input}"
                     else:
-                        # It's an image
                         try:
                             ai_image = Image.open(uploaded_file)
                         except Exception as e:
                             final_prompt = f"Error reading Image: {str(e)}. Attempted Question: {user_input}"
 
-                # Call AI
                 response = call_ai(final_prompt, ai_image)
                 st.session_state.messages.append({"role": "ai", "content": response})
                 
-                # Update usage tracker for free users
                 if not is_pro:
                     increment_question_count(username)
             
             st.rerun()
 
-# =========================================================
-# (Apne pure code mein 'Page 2: My Plan & Upgrade' wala section dhoondein)
-# Aur use is corrected code se replace kar dein.
-# =========================================================
-
 # ---------------------------------------------------------
-# Page 2: My Plan & Upgrade (Manual Telegram Process) - Corrected
+# Page 2: My Plan & Upgrade
 # ---------------------------------------------------------
 elif st.session_state.active_page == "plan":
     st.markdown("### 📚 Account Subscription")
     
-    # Status Card
     if is_pro:
         st.success(f"✅ Aapka PRO Plan Active hai! Expiry: {expiry_info} ({days_left} days left)")
         st.info("💡 Expiry khatam hone par niche diye process se renew karein.")
@@ -423,7 +391,6 @@ elif st.session_state.active_page == "plan":
 
     st.divider()
     
-    # Master Passcode Activation Section
     st.markdown("#### 🔐 Activate PRO via Passcode")
     st.caption("Agar aapne payment kar diya hai aur admin se Passcode mila hai, toh yahan enter karein.")
     
@@ -433,11 +400,9 @@ elif st.session_state.active_page == "plan":
         
     if submit_pass:
         if passcode_entered:
-            # Check master passcode
             ok, expiry = activate_pro_manual(username, passcode_entered.strip())
             if ok:
                 st.success(f"🎉 🎉 🎉 PRO Plan Activated Successfully! Valid till {expiry}. System reload ho raha hai...")
-                # Page refresh after successful activation
                 st.components.v1.html("<script>setTimeout(function(){window.parent.location.reload();}, 3000);</script>", height=1)
             else:
                 st.error("❌ Galat Passcode! Kripya sahi code enter karein ya payment screenshot Telegram par send karein.")
@@ -446,11 +411,9 @@ elif st.session_state.active_page == "plan":
 
     st.divider()
 
-    # MANUAL PAYMENT & TELEGRAM SECTION
     st.markdown("#### 🚀 Upgrade to PRO Plan (₹79 / 30 Days)")
     st.caption("Automatic payment band kar diya gaya hai. Ab aap niche diye process se manual payment karke account active kara sakte hain.")
 
-    # --- YAHAN THI ERROR --- Fixed line below:
     pay_col1, pay_col2 = st.columns([1.2, 1])
 
     with pay_col1:
@@ -482,13 +445,12 @@ elif st.session_state.active_page == "plan":
         if os.path.exists(QR_IMAGE_PATH):
             try:
                 qr_img = Image.open(QR_IMAGE_PATH)
-                # Resize image slightly to fit better if needed
                 st.image(qr_img, use_container_width=True)
                 st.caption("<p style='text-align:center;'>Scan with GPay, PhonePe, Paytm or any UPI app</p>", unsafe_allow_html=True)
             except Exception as pay_err:
                 st.error(f"Error loading QR Image: {str(pay_err)}")
         else:
-            st.error(f"⚠️ Payment QR Image (`{QR_IMAGE_PATH}`) GitHub par nahi mili! Kripya upload karein.")
+            st.error(f"⚠️️ Payment QR Image (`{QR_IMAGE_PATH}`) GitHub par nahi mili! Kripya upload karein.")
 
     st.divider()
     st.markdown("#### ⚖️ Policy & Terms")
@@ -496,6 +458,6 @@ elif st.session_state.active_page == "plan":
         st.write("""
             * **Manual Activation:** Payment screenshot received hone ke baad verification mein 10 minute se 4 ghante tak lag sakte hain. 
             * **Passcode:** Admin dwara diya gaya Passcode sirf ek baar use ho sakta hai. Use kisi aur ke saath share na karein.
-            * **No Refund:**PRO Plan ki digital delivery ke baad kisi bhi situation mein refund provide nahi kiya jayega.
+            * **No Refund:** PRO Plan ki digital delivery ke baad kisi bhi situation mein refund provide nahi kiya jayega.
             * **Support:** Agar payment ke baad 12 ghante tak passcode nahi milta, toh fir se Telegram par message karein.
         """)
