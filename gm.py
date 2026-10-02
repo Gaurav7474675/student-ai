@@ -58,6 +58,7 @@ PRO_PASSCODE = st.secrets.get("PRO_PASSCODE") or os.environ.get("PRO_PASSCODE") 
 
 RAZORPAY_KEY_ID = st.secrets.get("RAZORPAY_KEY_ID") or os.environ.get("RAZORPAY_KEY_ID", "")
 RAZORPAY_KEY_SECRET = st.secrets.get("RAZORPAY_KEY_SECRET") or os.environ.get("RAZORPAY_KEY_SECRET", "")
+RAZORPAY_WEBHOOK_SECRET = st.secrets.get("RAZORPAY_WEBHOOK_SECRET") or os.environ.get("RAZORPAY_WEBHOOK_SECRET", "")
 PRO_PRICE_PAISE = 7900  # ₹79
 
 DB_FILE = "users_database.db"
@@ -195,8 +196,54 @@ def increment_question_count(username):
         conn.commit()
 
 # =========================================================
-# 4. RAZORPAY PAYMENT SYSTEM
+# 4. RAZORPAY PAYMENT SYSTEM & WEBHOOK HANDLER
 # =========================================================
+def handle_razorpay_webhook():
+    """Razorpay Dashboard Webhook listener and automatic DB update."""
+    if st.query_params.get("webhook") == "razorpay":
+        try:
+            body = st.context.headers.get("request_body", "")
+            signature = st.context.headers.get("X-Razorpay-Signature", "")
+            
+            if RAZORPAY_WEBHOOK_SECRET and signature:
+                expected_sig = hmac.new(
+                    RAZORPAY_WEBHOOK_SECRET.encode(),
+                    body.encode('utf-8'),
+                    hashlib.sha256
+                ).hexdigest()
+                
+                if not hmac.compare_digest(expected_sig, signature):
+                    st.json({"status": "error", "message": "Invalid webhook signature"}, status_code=400)
+                    st.stop()
+            
+            data = json.loads(body) if body else {}
+            event = data.get("event")
+            
+            if event in ["payment.captured", "order.paid"]:
+                payment_entity = data.get("payload", {}).get("payment", {}).get("entity", {})
+                order_id = payment_entity.get("order_id")
+                payment_id = payment_entity.get("id")
+                
+                with get_db_connection() as conn:
+                    c = conn.cursor()
+                    c.execute("SELECT username FROM payments WHERE order_id=?", (order_id,))
+                    row = c.fetchone()
+                    if row:
+                        username = row[0]
+                        conn.execute("UPDATE payments SET payment_id=?, status='PAID' WHERE order_id=?", 
+                                     (payment_id, order_id))
+                        conn.commit()
+                        update_pro_status(username, days=30)
+            
+            st.json({"status": "ok"})
+            st.stop()
+        except Exception as e:
+            st.json({"status": "error", "detail": str(e)}, status_code=500)
+            st.stop()
+
+# Trigger webhook check
+handle_razorpay_webhook()
+
 def create_razorpay_order(username):
     try:
         resp = requests.post(
