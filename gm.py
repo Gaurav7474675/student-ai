@@ -13,6 +13,7 @@ import secrets
 import json
 from datetime import datetime, timedelta
 from streamlit_cookies_controller import CookieController
+
 # =========================================================
 # 1. PAGE CONFIG & UI STYLES
 # =========================================================
@@ -22,6 +23,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed"
 )
+
 st.markdown("""
     <style>
     #MainMenu, footer, header {visibility: hidden !important;}
@@ -47,25 +49,32 @@ st.markdown("""
     .feature-card { background-color:#121212; border:1px solid #222; padding:20px; border-radius:12px; margin-bottom:15px; }
     </style>
 """, unsafe_allow_html=True)
+
 # =========================================================
 # 2. CONFIG & SECRETS
 # =========================================================
 api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
 PRO_PASSCODE = st.secrets.get("PRO_PASSCODE") or os.environ.get("PRO_PASSCODE") or "GMCYBER2026"
+
 RAZORPAY_KEY_ID = st.secrets.get("RAZORPAY_KEY_ID") or os.environ.get("RAZORPAY_KEY_ID", "")
 RAZORPAY_KEY_SECRET = st.secrets.get("RAZORPAY_KEY_SECRET") or os.environ.get("RAZORPAY_KEY_SECRET", "")
 PRO_PRICE_PAISE = 7900  # ₹79
+
 DB_FILE = "users_database.db"
 MAX_FREE_QUESTIONS = 5
+
 # =========================================================
 # 3. DATABASE & USAGE TRACKING
 # =========================================================
 def get_db_connection():
     return sqlite3.connect(DB_FILE, timeout=10)
+
 def hash_password(password):
     return hashlib.sha256(password.encode('utf-8')).hexdigest()
+
 def generate_passcode():
     return f"PRO-{secrets.token_hex(4).upper()}"
+
 def init_db():
     with get_db_connection() as conn:
         c = conn.cursor()
@@ -84,7 +93,9 @@ def init_db():
             username TEXT, usage_date TEXT, count INTEGER DEFAULT 0,
             PRIMARY KEY (username, usage_date))''')
         conn.commit()
+
 init_db()
+
 def register_user(username, password, email):
     try:
         with get_db_connection() as conn:
@@ -97,6 +108,7 @@ def register_user(username, password, email):
         return False, "Username Already Exists!"
     except Exception as e:
         return False, f"Registration Error: {str(e)}"
+
 def validate_login(username, password):
     try:
         with get_db_connection() as conn:
@@ -106,6 +118,7 @@ def validate_login(username, password):
             return c.fetchone()
     except Exception:
         return None
+
 def create_session_token(username):
     token = secrets.token_urlsafe(32)
     with get_db_connection() as conn:
@@ -113,6 +126,7 @@ def create_session_token(username):
                      (token, username, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
         conn.commit()
     return token
+
 def get_user_from_token(token):
     if not token:
         return None
@@ -127,6 +141,7 @@ def get_user_from_token(token):
             return c.fetchone()
     except Exception:
         return None
+
 def delete_session_token(token):
     try:
         with get_db_connection() as conn:
@@ -134,6 +149,7 @@ def delete_session_token(token):
             conn.commit()
     except Exception:
         pass
+
 def update_pro_status(username, days=30):
     expiry_date = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
     new_passcode = generate_passcode()
@@ -142,6 +158,7 @@ def update_pro_status(username, days=30):
                      (expiry_date, new_passcode, username))
         conn.commit()
     return expiry_date, new_passcode
+
 def check_user_pro_validity(username):
     try:
         with get_db_connection() as conn:
@@ -159,6 +176,7 @@ def check_user_pro_validity(username):
             return True, row[1], max(0, days_left), row[2]
     except Exception:
         return False, "Free Tier", 0, None
+
 # --- DAILY QUESTION COUNTER LOGIC ---
 def get_today_question_count(username):
     today = datetime.now().strftime("%Y-%m-%d")
@@ -167,6 +185,7 @@ def get_today_question_count(username):
         c.execute("SELECT count FROM usage_tracker WHERE username=? AND usage_date=?", (username, today))
         row = c.fetchone()
         return row[0] if row else 0
+
 def increment_question_count(username):
     today = datetime.now().strftime("%Y-%m-%d")
     current = get_today_question_count(username)
@@ -174,6 +193,7 @@ def increment_question_count(username):
         conn.execute("INSERT OR REPLACE INTO usage_tracker (username, usage_date, count) VALUES (?, ?, ?)",
                      (username, today, current + 1))
         conn.commit()
+
 # =========================================================
 # 4. RAZORPAY PAYMENT SYSTEM
 # =========================================================
@@ -195,6 +215,7 @@ def create_razorpay_order(username):
         return None
     except Exception:
         return None
+
 def verify_razorpay_signature(order_id, payment_id, signature):
     if not (RAZORPAY_KEY_SECRET and order_id and payment_id and signature):
         return False
@@ -203,6 +224,7 @@ def verify_razorpay_signature(order_id, payment_id, signature):
         f"{order_id}|{payment_id}".encode(),
         hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected, signature)
+
 def process_verified_payment(order_id, payment_id, signature, username):
     if not verify_razorpay_signature(order_id, payment_id, signature):
         return False, "❌ Payment signature verification FAILED!", None
@@ -224,11 +246,13 @@ def process_verified_payment(order_id, payment_id, signature, username):
                 return False, "❌ Razorpay verification failed.", None
         except Exception as e:
             return False, f"❌ Error: {str(e)}", None
+
         conn.execute("UPDATE payments SET payment_id=?, signature=?, status='PAID' WHERE order_id=?",
                      (payment_id, signature, order_id))
         conn.commit()
     expiry, pass_key = update_pro_status(username, days=30)
     return True, f"🎉 Payment Verified! Pro Active Till {expiry}!", pass_key
+
 def render_razorpay_checkout(order, username, app_url):
     checkout_html = f"""
     <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
@@ -259,6 +283,7 @@ def render_razorpay_checkout(order, username, app_url):
     </script>
     """
     components.html(checkout_html, height=150)
+
 # =========================================================
 # 5. SESSION & APP URL HELPERS
 # =========================================================
@@ -266,8 +291,10 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 if "active_page" not in st.session_state:
     st.session_state.active_page = "chat"
+
 cookies = CookieController()
 SESSION_COOKIE = "student_ai_session"
+
 def get_app_url():
     try:
         headers = st.context.headers
@@ -276,6 +303,7 @@ def get_app_url():
         return f"{proto}://{host}/"
     except Exception:
         return "http://localhost:8501/"
+
 if not st.session_state.get("is_logged_in", False):
     cookie_token = cookies.get(SESSION_COOKIE)
     user_rec = get_user_from_token(cookie_token)
@@ -283,6 +311,7 @@ if not st.session_state.get("is_logged_in", False):
         st.session_state.is_logged_in = True
         st.session_state.user_data = {"username": user_rec[0], "email": user_rec[1]}
         st.rerun()
+
 rzp_payment = st.query_params.get("rzp_payment")
 rzp_order = st.query_params.get("rzp_order")
 rzp_sig = st.query_params.get("rzp_sig")
@@ -293,6 +322,7 @@ if rzp_payment and rzp_order and rzp_sig:
                                                st.session_state.user_data["username"])
         st.session_state.rzp_result = (ok, msg, pk)
         st.rerun()
+
 # =========================================================
 # 6. AI ENGINE
 # =========================================================
@@ -321,6 +351,7 @@ def call_ai(prompt, image=None):
         return "⚠️ Timeout Error. Kripya punah prayas karein."
     except Exception as e:
         return f"Network Error: {str(e)}"
+
 # =========================================================
 # 7. LOGIN / REGISTER SCREEN
 # =========================================================
@@ -330,7 +361,9 @@ if not st.session_state.get("is_logged_in", False):
         st.markdown("<h2 style='text-align:center;'>🛡️ Student AI</h2>", unsafe_allow_html=True)
         st.caption("<p style='text-align:center;'>Sign in to start learning</p>", unsafe_allow_html=True)
         st.divider()
+
         auth_tab1, auth_tab2 = st.tabs(["🔐 Sign In", "📝 Create Account"])
+
         with auth_tab1:
             with st.form(key="login_form"):
                 login_user = st.text_input("👤 Username")
@@ -347,6 +380,7 @@ if not st.session_state.get("is_logged_in", False):
                     st.rerun()
                 else:
                     st.error("❌ Invalid Credentials!")
+
         with auth_tab2:
             with st.form(key="reg_form"):
                 reg_email = st.text_input("📧 Email")
@@ -360,21 +394,25 @@ if not st.session_state.get("is_logged_in", False):
                 else:
                     st.error("Sabhi fields bharein!")
     st.stop()
+
 # =========================================================
 # 8. MAIN APP DASHBOARD
 # =========================================================
 username = st.session_state.user_data["username"]
 is_pro, expiry_info, days_left, passcode_key = check_user_pro_validity(username)
 app_display_name = "Student AI Pro" if is_pro else "Student AI"
+
 # Check usage counts
 used_questions = get_today_question_count(username)
 remaining_questions = max(0, MAX_FREE_QUESTIONS - used_questions)
+
 with st.sidebar:
     st.markdown(f"### 🛡️ {app_display_name}")
     st.caption(f"Logged as **@{username}** ({'👑 PRO' if is_pro else '🆓 Free Plan'})")
     if not is_pro:
         st.info(f"📊 **Today's Free Usage**: {used_questions}/{MAX_FREE_QUESTIONS} Questions Used")
     st.divider()
+
     if st.button("💬 Chat AI Interface", use_container_width=True):
         st.session_state.active_page = "chat"; st.rerun()
     if st.button("📱 About App & Plans", use_container_width=True):
@@ -382,6 +420,7 @@ with st.sidebar:
     if st.button("👨‍💻 Developer Profile", use_container_width=True):
         st.session_state.active_page = "developer"; st.rerun()
     st.divider()
+
     with st.expander("💳 Upgrade / Activate Pro", expanded=not is_pro):
         if is_pro:
             st.success(f"PRO Active! Days Left: {days_left}")
@@ -405,111 +444,222 @@ with st.sidebar:
             if st.button("Activate via Passcode", use_container_width=True):
                 if admin_code.strip() == PRO_PASSCODE:
                     exp, pass_k = update_pro_status(username)
-                    st.success(f"🎉 Passcode Accepted! Pro Active till {exp}")
+                    st.success("🎉 Passcode Accepted! PRO Activated.")
                     st.rerun()
                 else:
                     st.error("❌ Invalid Passcode!")
-    st.divider()
-    if st.button("🚪 Log Out", use_container_width=True):
-        token = cookies.get(SESSION_COOKIE)
-        delete_session_token(token)
-        cookies.remove(SESSION_COOKIE)
-        st.session_state.clear()
+
+    if st.button("🚪 Logout Account", use_container_width=True):
+        delete_session_token(cookies.get(SESSION_COOKIE))
+        cookies.set(SESSION_COOKIE, "", max_age=0)
+        st.session_state.is_logged_in = False
+        st.session_state.user_data = None
         st.rerun()
-# --- TOP APP HEADER ---
-st.markdown(f"""
-    <div class="top-bar-custom">
-        <div class="app-title-text">{app_display_name}{'<span class="pro-badge">PRO</span>' if is_pro else ''}</div>
-        <div style="font-size:13px; color:#888;">{datetime.now().strftime("%d %B %Y")}</div>
-    </div>
-""", unsafe_allow_html=True)
-# Handle Payment Verification Result Message
-if "rzp_result" in st.session_state:
+
+if st.session_state.get("rzp_result"):
     ok, msg, pk = st.session_state.rzp_result
-    del st.session_state["rzp_result"]
-    if ok:
-        st.balloons()
-        st.success(f"{msg}\n\nYour Unique Passcode: `{pk}`")
-    else:
-        st.error(msg)
-# =========================================================
-# 9. PAGE NAVIGATION ROUTING
-# =========================================================
-# PAGE 1: CHAT INTERFACE
+    (st.success if ok else st.error)(msg)
+    if ok and pk:
+        st.code(f"Your Passcode Key: {pk}")
+    st.session_state.rzp_result = None
+
+# --- TOP HEADER BAR ---
+h_col1, h_col2, h_col3 = st.columns([1, 4, 1])
+with h_col1:
+    with st.popover("☰ Menu"):
+        st.markdown("### Navigation Drawer")
+        if st.button("💬 Chat Interface", key="pop_chat", use_container_width=True):
+            st.session_state.active_page = "chat"; st.rerun()
+        if st.button("📱 About & Plans", key="pop_about", use_container_width=True):
+            st.session_state.active_page = "about"; st.rerun()
+        if st.button("👨‍💻 Developer Profile", key="pop_dev", use_container_width=True):
+            st.session_state.active_page = "developer"; st.rerun()
+with h_col2:
+    pro_tag = '<span class="pro-badge">PRO</span>' if is_pro else ''
+    st.markdown(f"<div style='text-align:center;'><span class='app-title-text'>🛡️ {app_display_name}</span>{pro_tag}</div>", unsafe_allow_html=True)
+with h_col3:
+    with st.popover("⋮ More"):
+        st.markdown(f"**User:** @{username}")
+        st.caption(f"Status: {'👑 PRO Active' if is_pro else '🆓 Free Plan'}")
+        st.divider()
+        if st.button("👨‍💻 Developer Profile", key="top_dev_btn", use_container_width=True):
+            st.session_state.active_page = "developer"; st.rerun()
+
+st.divider()
+
+# --- PAGE 1: CHAT ---
 if st.session_state.active_page == "chat":
-    for message in st.session_state.messages:
-        div_class = "chat-user" if message["role"] == "user" else "chat-ai"
-        st.markdown(f'<div class="{div_class}">{message["content"]}</div>', unsafe_allow_html=True)
-    if not is_pro:
-        st.markdown(f'<div class="plan-notice">Free Tier: {remaining_questions} questions left today</div>', unsafe_allow_html=True)
-    can_ask = is_pro or remaining_questions > 0
-    
-    if not can_ask:
-        st.error("⚠️ Daily Free limit reached! Upgrade to PRO for unlimited questions.")
-    else:
-        uploaded_file = st.file_uploader("📁 Upload image or PDF (Optional)", type=["png", "jpg", "jpeg", "pdf"], label_visibility="collapsed")
-        
-        with st.form(key="chat_input_form", clear_on_submit=True):
-            cols = st.columns([8, 2])
-            user_input = cols[0].text_input("Ask Student AI...", placeholder="Type question or upload file...", label_visibility="collapsed")
-            submit_chat = cols[1].form_submit_button("Send", type="primary", use_container_width=True)
-        if submit_chat and (user_input or uploaded_file):
-            content_text = user_input if user_input else "Uploaded a file."
-            st.session_state.messages.append({"role": "user", "content": content_text})
-            
-            with st.spinner("Student AI is processing..."):
-                final_prompt = user_input
-                ai_image = None
-                
-                if uploaded_file:
-                    if uploaded_file.type == "application/pdf":
-                        try:
-                            reader = PdfReader(uploaded_file)
-                            pdf_text = ""
-                            page_limit = len(reader.pages) if is_pro else 3
-                            for page in reader.pages[:page_limit]:
-                                pdf_text += page.extract_text()
-                            final_prompt = f"Context from PDF:\n{pdf_text}\n\nUser Question: {user_input}"
-                        except Exception as e:
-                            final_prompt = f"Error reading PDF: {str(e)}. Attempted Question: {user_input}"
+    if not st.session_state.messages:
+        st.markdown(f"<h3 style='text-align: center; margin-top: 20px;'>Hi {username}! 👋</h3>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #8E8E93;'>Apne Doubts, PDF Notes, ya Exam Questions upload karke solution paayein!</p>", unsafe_allow_html=True)
+
+    for msg in st.session_state.messages:
+        if msg["role"] == "user":
+            st.markdown(f'<div class="chat-user">{msg["content"]}</div>', unsafe_allow_html=True)
+        else:
+            st.markdown(f'<div class="chat-ai">{msg["content"]}</div>', unsafe_allow_html=True)
+    st.markdown("<div style='clear: both;'></div>", unsafe_allow_html=True)
+
+    with st.popover("📎 Attach PDF Notes / Photo Problem"):
+        st.markdown("### Attach Document / Image")
+        attach_type = st.radio("Choose Mode:", ["PDF Exam Solver", "Photo Problem Solver"])
+
+        if attach_type == "PDF Exam Solver":
+            uploaded_pdf = st.file_uploader("Upload PDF Notes:", type=["pdf"])
+            pdf_feature = st.selectbox("Output Format:", ["⚡ Quick Revision Notes", "🎯 Important Exam Questions", "🧪 Practice Quiz (MCQs)"])
+            if uploaded_pdf and st.button("🚀 Process PDF", type="primary", use_container_width=True):
+                try:
+                    reader = PdfReader(io.BytesIO(uploaded_pdf.getvalue()))
+                    page_count = len(reader.pages)
+                    if page_count > 3 and not is_pro:
+                        st.error("🔒 Free version mein maximum 3 pages allowed hain! Pro lein unlimited pages ke liye.")
                     else:
-                        try:
-                            ai_image = Image.open(uploaded_file)
-                        except Exception as e:
-                            final_prompt = f"Error reading Image: {str(e)}. Attempted Question: {user_input}"
-                response = call_ai(final_prompt, ai_image)
-                st.session_state.messages.append({"role": "ai", "content": response})
-                
-                if not is_pro:
-                    increment_question_count(username)
-            
+                        max_pages = page_count if is_pro else min(page_count, 3)
+                        extracted_text = "".join([p.extract_text() or "" for p in reader.pages[:max_pages]])
+                        prompt_text = f"Analyze document and generate '{pdf_feature}':\n\n{extracted_text[:80000]}"
+                        st.session_state.messages.append({"role": "user", "content": f"📂 Analyzed PDF: {uploaded_pdf.name}"})
+                        with st.spinner("Processing PDF..."):
+                            res = call_ai(prompt_text)
+                            st.session_state.messages.append({"role": "assistant", "content": res})
+                        st.rerun()
+                except Exception as pdf_err:
+                    st.error(f"Error parsing PDF: {str(pdf_err)}")
+
+        elif attach_type == "Photo Problem Solver":
+            if not is_pro:
+                st.error("🔒 Photo Solver feature strictly Pro version me available hai!")
+            else:
+                uploaded_img = st.file_uploader("Upload Image:", type=["jpg", "png", "jpeg"])
+                if uploaded_img and st.button("⚡ Solve Photo Question", type="primary", use_container_width=True):
+                    try:
+                        img = Image.open(uploaded_img)
+                        st.session_state.messages.append({"role": "user", "content": "📷 Photo Question Uploaded"})
+                        with st.spinner("Solving Question..."):
+                            res = call_ai("Solve this question with step-by-step detail:", image=img)
+                            st.session_state.messages.append({"role": "assistant", "content": res})
+                        st.rerun()
+                    except Exception as img_err:
+                        st.error(f"Error processing image: {str(img_err)}")
+
+    # FREEMIUM LOCK LOGIC IMPLEMENTATION
+    if not is_pro and used_questions >= MAX_FREE_QUESTIONS:
+        st.error("🚨 **Daily Limit Reached!** Aapne aaj ke 5 Free Questions complete kar liye hain.")
+        st.markdown("""
+        <div style="background-color: #1E1010; border: 2px solid #FF4D4D; border-radius: 12px; padding: 20px; text-align: center; margin-top: 10px; margin-bottom: 25px;">
+            <h2 style="color: #FF4D4D; margin-top: 0;">🔒 Upgrade to Pro to Continue</h2>
+            <p style="color: #CCCCCC; font-size: 15px;">Aaj ki daily limit (5 Questions) poori ho chuki hai. Unlimited questions, Photo Question Solver, aur full PDF scanning ke liye abhi <b>Pro Upgrade</b> karein!</p>
+            <h3 style="color: #FFD700;">Kewal ₹79 / Month</h3>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        if RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
+            if st.button("👑 Unlock Unlimited Questions (Pay ₹79)", type="primary", use_container_width=True):
+                order = create_razorpay_order(username)
+                if order:
+                    st.session_state.rzp_order = order
+                else:
+                    st.error("Order create nahi ho saka.")
+            if st.session_state.get("rzp_order"):
+                render_razorpay_checkout(st.session_state.rzp_order, username, get_app_url())
+        else:
+            st.info("Payment setup karne ke liye secrets.toml mein Razorpay Keys dalein.")
+    else:
+        user_prompt = st.chat_input("Kuch bhi puchein...")
+        status_text = "Plan Mode: Pro (Unlimited Access)" if is_pro else f"Plan Mode: Free Tier ({remaining_questions} Questions Left Today)"
+        st.markdown(f"<div class='plan-notice'>{status_text}</div>", unsafe_allow_html=True)
+
+        if user_prompt:
+            st.session_state.messages.append({"role": "user", "content": user_prompt})
+            if not is_pro:
+                increment_question_count(username)
+            with st.spinner("Thinking..."):
+                res = call_ai(user_prompt)
+                st.session_state.messages.append({"role": "assistant", "content": res})
             st.rerun()
-# PAGE 2: ABOUT APP & PLANS
+
+# --- PAGE 2: ABOUT ---
 elif st.session_state.active_page == "about":
-    st.markdown("### 📱 About Student AI")
-    st.write("Student AI is designed to assist students with quick AI answers, document explanations, and multi-modal problem solving.")
-    
-    st.markdown('<div class="feature-card">', unsafe_allow_html=True)
-    st.markdown("#### ⚡ Free vs Pro Plan Comparison")
-    st.markdown("""
+    st.markdown(f"## 📱 About {app_display_name} & Membership Plans")
+    st.write("Student AI platform specially built for students to solve exam questions, generate revision notes, and analyze PDF study materials instantly.")
+    st.divider()
 
-| Feature | Free Tier | PRO Plan (₹79/mo) |
-| :--- | :--- | :--- |
-| **Daily Limit** | 5 Questions / Day | ♾️ Unlimited Questions |
-| **PDF Reading** | Up to 3 Pages | ♾️ Unlimited Pages |
-| **Photo Solver** | Basic | ⚡ Full Access |
-| **Speed** | Normal | 🚀 High Priority |
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+        st.markdown("""
+        <div class="feature-card">
+            <h3>🆓 Free Version (Student AI)</h3>
+            <ul>
+                <li><b>Daily Limit</b>: Maximum <b>5 Direct Questions/Day</b>.</li>
+                <li><b>PDF Page Limit</b>: Strictly <b>3 Pages</b> per document.</li>
+                <li><b>Standard Speed</b>.</li>
+                <li><b>Photo Solver</b>: Not Included.</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+    with col_f2:
+        st.markdown("""
+        <div class="feature-card" style="border: 1px solid #38BDF8;">
+            <h3 style="color: #38BDF8;">👑 Pro Version (Student AI Pro)</h3>
+            <ul>
+                <li><b>Unlimited Questions</b>: Koi daily limit nahi.</li>
+                <li><b>Unlimited PDF Scanning</b>: Complete books & syllabus extract karein.</li>
+                <li><b>Photo Question Solver</b>: Math/Science photos ka instant answer.</li>
+                <li><b>Fast Response Speed</b>.</li>
+                <li><b>Secure Auto-Verified Payment</b>.</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+    st.divider()
 
-    """)
-    st.markdown('</div>', unsafe_allow_html=True)
-# PAGE 3: DEVELOPER PROFILE
+    if not is_pro:
+        st.subheader("💳 Activate Pro Membership (Auto-Verified)")
+        st.info("✅ Payment Razorpay se automatically verify hoti hai.")
+        if RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
+            if st.button("💳 Pay ₹79 Securely Now", type="primary", use_container_width=True):
+                order = create_razorpay_order(username)
+                if order:
+                    st.session_state.rzp_order = order
+                else:
+                    st.error("Order creation failed.")
+            if st.session_state.get("rzp_order"):
+                render_razorpay_checkout(st.session_state.rzp_order, username, get_app_url())
+        else:
+            st.error("Razorpay keys missing in secrets!")
+        
+        admin_code = st.text_input("Admin Passcode (special):", key="about_admin_key")
+        if st.button("⚡ Activate via Admin Passcode", use_container_width=True):
+            if admin_code.strip() == PRO_PASSCODE:
+                exp, pass_k = update_pro_status(username)
+                st.success(f"🎉 Admin Passcode Accepted! PRO Active till {exp}")
+                st.rerun()
+            else:
+                st.error("❌ Invalid Admin Passcode!")
+    else:
+        st.success(f"🎉 Pro Active! Days Left: {days_left}")
+        if passcode_key:
+            st.code(f"Passcode Key: {passcode_key}")
+
+# --- PAGE 3: DEVELOPER ---
 elif st.session_state.active_page == "developer":
-    st.markdown("### 👨‍💻 Developer Profile")
-    st.markdown("""
-    <div class="feature-card">
-        <h3>Student AI System</h3>
-        <p>Built for learning, automated cyber tools, and AI study acceleration.</p>
-        <hr style="border:1px solid #333;">
-        <p><b>Security & Tech Stack:</b> Python, Streamlit, SQLite, Gemini API, Razorpay Integration.</p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.markdown("## 👨‍💻 Developer Profile")
+    st.divider()
+    dev_col1, dev_col2 = st.columns([1, 2])
+    PROFILE_IMG_URL = "https://raw.githubusercontent.com/Gaurav7474675/student-ai/main/profile.jpeg"
+    with dev_col1:
+        st.markdown(f"""
+        <div style="text-align: center; padding: 20px; background-color: #121212; border-radius: 12px; border: 1px solid #222;">
+            <img src="{PROFILE_IMG_URL}" style="width: 110px; height: 110px; border-radius: 50%; object-fit: cover; border: 2px solid #38BDF8; margin-bottom: 10px;">
+            <h3 style="margin-bottom: 0px;">Cyber Gaurav</h3>
+            <p style="color: #38BDF8; font-size: 14px; margin-top: 4px;">Lead Developer & AI Creator</p>
+        </div>
+        """, unsafe_allow_html=True)
+    with dev_col2:
+        st.markdown("""
+        ### About the Developer
+        **Cyber Gaurav** is a developer and student innovator dedicated to creating accessible AI tools for students.
+
+        - **Project Name**: Student AI / Student AI Pro
+        - **Mission**: Making exam preparation and study note extraction effortless using AI models.
+        - **Tech Stack**: Python, Streamlit, OpenRouter API, SQLite3, Razorpay Integration.
+        """)
+        st.link_button("💬 Contact Developer on WhatsApp", "https://wa.me/910000000000", use_container_width=True)
