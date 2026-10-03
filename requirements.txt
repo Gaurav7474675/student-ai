@@ -4,3 +4,4 @@ pillow
 requests
 streamlit-cookies-controller
 streamlit-autorefresh
+google-genai
