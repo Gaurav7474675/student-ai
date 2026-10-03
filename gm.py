@@ -60,6 +60,8 @@ RAZORPAY_KEY_ID = st.secrets.get("RAZORPAY_KEY_ID") or os.environ.get("RAZORPAY_
 RAZORPAY_KEY_SECRET = st.secrets.get("RAZORPAY_KEY_SECRET") or os.environ.get("RAZORPAY_KEY_SECRET", "")
 PRO_PRICE_PAISE = 7900  # ₹79
 
+PAYMENT_QR_URL = "https://raw.githubusercontent.com/Gaurav7474675/student-ai/main/payment_qr.png"
+
 DB_FILE = "users_database.db"
 MAX_FREE_QUESTIONS = 5
 
@@ -428,6 +430,16 @@ with st.sidebar:
                 st.code(f"Passcode: {passcode_key}")
         else:
             st.write("🔥 **Unlock Unlimited Direct Questions, Unlimited PDF Pages & Photo Solver!**")
+            
+            # --- QR CODE DISPLAY IN SIDEBAR ---
+            st.image(PAYMENT_QR_URL, caption="Scan QR to Pay ₹79", use_container_width=True)
+            st.markdown("""
+            **Pro Version Activate Karne Ka Tareeka:**
+            1. Upar diye gaye QR Code par ₹79 ka payment karein.
+            2. Payment screenshot aur apna Username admin ko bhejein.
+            3. Admin dwara mila Passcode neeche daalkar instant Pro activate karein.
+            """)
+
             if RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
                 if st.button("💳 Pay ₹79 Securely (Auto-Verify)", type="primary", use_container_width=True):
                     order = create_razorpay_order(username)
@@ -438,7 +450,7 @@ with st.sidebar:
                 if st.session_state.get("rzp_order"):
                     render_razorpay_checkout(st.session_state.rzp_order, username, get_app_url())
             else:
-                st.warning("Razorpay keys missing in secrets!")
+                st.info("Direct online payment ke alawa aap Passcode se bhi activate kar sakte hain.")
             
             admin_code = st.text_input("Admin Passcode:", key="side_admin_key")
             if st.button("Activate via Passcode", use_container_width=True):
@@ -613,7 +625,21 @@ elif st.session_state.active_page == "about":
 
     if not is_pro:
         st.subheader("💳 Activate Pro Membership (Auto-Verified)")
-        st.info("✅ Payment Razorpay se automatically verify hoti hai.")
+        
+        # --- VIDEO MEIN CIRCLE KIYE GAYE SECTION PAR QR IMAGE ---
+        qr_col1, qr_col2 = st.columns([1, 2])
+        with qr_col1:
+            st.image(PAYMENT_QR_URL, caption="Scan QR & Pay ₹79", width=220)
+        with qr_col2:
+            st.markdown("""
+            ### 📌 How to Activate Pro Version:
+            1. **QR Code Scan Karein**: Diye gaye QR code ko kisi bhi UPI App (PhonePe / Google Pay / Paytm) se scan karke **₹79** ka payment karein.
+            2. **Screenshot Bhejein**: Payment ka screenshot aur apna registered **Username** developer ko WhatsApp par bhejein.
+            3. **Passcode Enter Karein**: Admin dwara praapt Passcode ko neeche box mein daal kar **Activate via Admin Passcode** par click karein.
+            """)
+        st.divider()
+
+        st.info("✅ Direct Razorpay payment auto-verify hoti hai.")
         if RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
             if st.button("💳 Pay ₹79 Securely Now", type="primary", use_container_width=True):
                 order = create_razorpay_order(username)
@@ -624,7 +650,7 @@ elif st.session_state.active_page == "about":
             if st.session_state.get("rzp_order"):
                 render_razorpay_checkout(st.session_state.rzp_order, username, get_app_url())
         else:
-            st.error("Razorpay keys missing in secrets!")
+            st.warning("Razorpay keys absent. QR Payment ya Passcode use karein.")
         
         admin_code = st.text_input("Admin Passcode (special):", key="about_admin_key")
         if st.button("⚡ Activate via Admin Passcode", use_container_width=True):
