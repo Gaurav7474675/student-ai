@@ -352,47 +352,29 @@ def call_ai(prompt, image=None):
         return f"Gemini Error: {str(e)}"
 
 # =========================================================
-# 7. LOGIN / REGISTER SCREEN
+# 6. AI ENGINE (DIRECT GOOGLE GEMINI)
 # =========================================================
-if not st.session_state.get("is_logged_in", False):
-    col_l1, col_l2, col_l3 = st.columns([1, 2, 1])
-    with col_l2:
-        st.markdown("<h2 style='text-align:center;'>🛡️ Student AI</h2>", unsafe_allow_html=True)
-        st.caption("<p style='text-align:center;'>Sign in to start learning</p>", unsafe_allow_html=True)
-        st.divider()
+def call_ai(prompt, image=None):
+    if not api_key:
+        return "⚠️ Secrets mein GEMINI_API_KEY missing hai!"
+        
+    try:
+        # Direct Google Gemini Client Initialization
+        client = genai.Client(api_key=api_key.strip())
+        
+        contents = [prompt]
+        if image:
+            contents.append(image)
+            
+        # Standard stable model name
+        response = client.models.generate_content(
+            model='gemini-1.5-flash',
+            contents=contents
+        )
+        return response.text
+    except Exception as e:
+        return f"Gemini Error: {str(e)}"
 
-        auth_tab1, auth_tab2 = st.tabs(["🔐 Sign In", "📝 Create Account"])
-
-        with auth_tab1:
-            with st.form(key="login_form"):
-                login_user = st.text_input("👤 Username")
-                login_pass = st.text_input("🔑 Password", type="password")
-                submit_login = st.form_submit_button("Log In", type="primary", use_container_width=True)
-            if submit_login:
-                user = validate_login(login_user.strip(), login_pass.strip())
-                if user:
-                    st.session_state.is_logged_in = True
-                    st.session_state.user_data = {"username": user[0], "email": user[1]}
-                    token = create_session_token(user[0])
-                    cookies.set(SESSION_COOKIE, token, max_age=60*60*24*365)
-                    st.success("Login Success!")
-                    st.rerun()
-                else:
-                    st.error("❌ Invalid Credentials!")
-
-        with auth_tab2:
-            with st.form(key="reg_form"):
-                reg_email = st.text_input("📧 Email")
-                reg_user = st.text_input("Username")
-                reg_pass = st.text_input("Password", type="password")
-                submit_reg = st.form_submit_button("Sign Up", type="primary", use_container_width=True)
-            if submit_reg:
-                if reg_user and reg_pass and reg_email:
-                    success, msg = register_user(reg_user.strip(), reg_pass.strip(), reg_email.strip())
-                    (st.success if success else st.error)(msg)
-                else:
-                    st.error("Sabhi fields bharein!")
-    st.stop()
 
 # =========================================================
 # 8. MAIN APP DASHBOARD
