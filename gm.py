@@ -13,6 +13,7 @@ import secrets
 import json
 from datetime import datetime, timedelta
 from streamlit_cookies_controller import CookieController
+from google import genai  # <-- YAHAN ADD KAREIN
 
 # =========================================================
 # 1. PAGE CONFIG & UI STYLES
@@ -326,33 +327,29 @@ if rzp_payment and rzp_order and rzp_sig:
         st.rerun()
 
 # =========================================================
-# 6. AI ENGINE
+
+# =========================================================
+# 6. AI ENGINE (DIRECT GOOGLE GEMINI)
 # =========================================================
 def call_ai(prompt, image=None):
     if not api_key:
-        return "⚠️ API Key Missing! Secrets mein GEMINI_API_KEY set karein."
-    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-    content_payload = [{"type": "text", "text": prompt}]
-    if image:
-        try:
-            buffered = io.BytesIO()
-            image.save(buffered, format="PNG")
-            img_str = base64.b64encode(buffered.getvalue()).decode()
-            content_payload.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_str}"}})
-        except Exception as img_err:
-            return f"Image Processing Error: {str(img_err)}"
-    payload = {"model": "google/gemini-2.5-flash",
-               "messages": [{"role": "user", "content": content_payload}], "max_tokens": 2000}
+        return "⚠️ Secrets mein GEMINI_API_KEY missing hai!"
+        
     try:
-        response = requests.post("https://openrouter.ai/api/v1/chat/completions",
-                                 headers=headers, json=payload, timeout=60)
-        if response.status_code == 200:
-            return response.json()["choices"][0]["message"]["content"]
-        return f"API Error ({response.status_code}): {response.text}"
-    except requests.exceptions.Timeout:
-        return "⚠️ Timeout Error. Kripya punah prayas karein."
+        # Direct Google Gemini Client Initialization
+        client = genai.Client(api_key=api_key.strip())
+        
+        contents = [prompt]
+        if image:
+            contents.append(image)
+            
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=contents
+        )
+        return response.text
     except Exception as e:
-        return f"Network Error: {str(e)}"
+        return f"Gemini Error: {str(e)}"
 
 # =========================================================
 # 7. LOGIN / REGISTER SCREEN
