@@ -10,12 +10,10 @@ import sqlite3
 import hashlib
 import hmac
 import secrets
-import json
 from datetime import datetime, timedelta
-from streamlit_cookies_controller import CookieController
 
 # =========================================================
-# 1. PAGE CONFIG & UI STYLES
+# 1. PAGE CONFIG & STYLES (NO LOADING ISSUES)
 # =========================================================
 st.set_page_config(
     page_title="Student AI",
@@ -53,7 +51,6 @@ st.markdown("""
 # =========================================================
 # 2. CONFIG & SECRETS
 # =========================================================
-api_key = st.secrets.get("OPENROUTER_API_KEY") or st.secrets.get("GEMINI_API_KEY") or os.environ.get("OPENROUTER_API_KEY")
 PRO_PASSCODE = st.secrets.get("PRO_PASSCODE") or os.environ.get("PRO_PASSCODE") or "GMCYBER2026"
 
 RAZORPAY_KEY_ID = st.secrets.get("RAZORPAY_KEY_ID") or os.environ.get("RAZORPAY_KEY_ID", "")
@@ -61,6 +58,7 @@ RAZORPAY_KEY_SECRET = st.secrets.get("RAZORPAY_KEY_SECRET") or os.environ.get("R
 PRO_PRICE_PAISE = 7900  # ₹79
 
 PAYMENT_QR_URL = "https://raw.githubusercontent.com/Gaurav7474675/student-ai/main/payment_qr.png"
+PROFILE_IMG_URL = "https://raw.githubusercontent.com/Gaurav7474675/student-ai/main/profile.jpeg"
 
 DB_FILE = "users_database.db"
 MAX_FREE_QUESTIONS = 5
@@ -69,7 +67,7 @@ MAX_FREE_QUESTIONS = 5
 # 3. DATABASE & USAGE TRACKING
 # =========================================================
 def get_db_connection():
-    return sqlite3.connect(DB_FILE, timeout=10)
+    return sqlite3.connect(DB_FILE, timeout=15)
 
 def hash_password(password):
     return hashlib.sha256(password.encode('utf-8')).hexdigest()
@@ -85,8 +83,6 @@ def init_db():
             is_pro INTEGER DEFAULT 0, pro_expiry TEXT, passcode TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS transactions (
             txn_id TEXT PRIMARY KEY, username TEXT, status TEXT, timestamp TEXT)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS sessions (
-            token TEXT PRIMARY KEY, username TEXT, created_at TEXT)''')
         c.execute('''CREATE TABLE IF NOT EXISTS payments (
             order_id TEXT PRIMARY KEY, username TEXT, payment_id TEXT,
             signature TEXT, status TEXT, timestamp TEXT)''')
@@ -119,37 +115,6 @@ def validate_login(username, password):
             return c.fetchone()
     except Exception:
         return None
-
-def create_session_token(username):
-    token = secrets.token_urlsafe(32)
-    with get_db_connection() as conn:
-        conn.execute("INSERT INTO sessions (token, username, created_at) VALUES (?, ?, ?)",
-                     (token, username, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
-        conn.commit()
-    return token
-
-def get_user_from_token(token):
-    if not token:
-        return None
-    try:
-        with get_db_connection() as conn:
-            c = conn.cursor()
-            c.execute("SELECT username FROM sessions WHERE token=?", (token,))
-            row = c.fetchone()
-            if not row:
-                return None
-            c.execute("SELECT username, email FROM users WHERE username=?", (row[0],))
-            return c.fetchone()
-    except Exception:
-        return None
-
-def delete_session_token(token):
-    try:
-        with get_db_connection() as conn:
-            conn.execute("DELETE FROM sessions WHERE token=?", (token,))
-            conn.commit()
-    except Exception:
-        pass
 
 def update_pro_status(username, days=30):
     expiry_date = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
@@ -233,7 +198,7 @@ def process_verified_payment(order_id, payment_id, signature, username):
         c.execute("SELECT status FROM payments WHERE order_id=?", (order_id,))
         row = c.fetchone()
         if row and row[0] == "PAID":
-            return False, "⚠️ Ye payment pehle se use ho chuka hai!", None
+            return False, "⚠️ Ye payment pehle se verify ho chuka hai!", None
         
         try:
             pr = requests.get(f"https://api.razorpay.com/v1/payments/{payment_id}",
@@ -285,15 +250,14 @@ def render_razorpay_checkout(order, username, app_url):
     components.html(checkout_html, height=150)
 
 # =========================================================
-# 5. SESSION & APP URL HELPERS
+# 5. SESSION & APP STATE
 # =========================================================
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "active_page" not in st.session_state:
     st.session_state.active_page = "chat"
-
-cookies = CookieController()
-SESSION_COOKIE = "student_ai_session"
+if "is_logged_in" not in st.session_state:
+    st.session_state.is_logged_in = False
 
 def get_app_url():
     try:
@@ -303,14 +267,6 @@ def get_app_url():
         return f"{proto}://{host}/"
     except Exception:
         return "http://localhost:8501/"
-
-if not st.session_state.get("is_logged_in", False):
-    cookie_token = cookies.get(SESSION_COOKIE)
-    user_rec = get_user_from_token(cookie_token)
-    if user_rec:
-        st.session_state.is_logged_in = True
-        st.session_state.user_data = {"username": user_rec[0], "email": user_rec[1]}
-        st.rerun()
 
 rzp_payment = st.query_params.get("rzp_payment")
 rzp_order = st.query_params.get("rzp_order")
@@ -324,24 +280,21 @@ if rzp_payment and rzp_order and rzp_sig:
         st.rerun()
 
 # =========================================================
-# 6. AI ENGINE (DIRECT GEMINI API - FIXED)
+# 6. AI ENGINE (DIRECT OFFICIAL GEMINI API)
 # =========================================================
 def call_ai(prompt, image=None):
-    # Secrets se Gemini key uthayein
     gemini_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
     
     if not gemini_key or "YOUR_" in gemini_key:
         return "⚠️ Gemini API Key Missing! Secrets.toml mein GEMINI_API_KEY set karein."
     
-    gemini_key = gemini_key.strip().replace('"', '').replace("'", "")
+    gemini_key = str(gemini_key).strip().replace('"', '').replace("'", "")
     
-    # Official stable Gemini Flash model endpoint
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
     headers = {"Content-Type": "application/json"}
     
     parts = []
     
-    # Agar image upload hui hai
     if image:
         try:
             buffered = io.BytesIO()
@@ -356,23 +309,14 @@ def call_ai(prompt, image=None):
         except Exception as img_err:
             return f"Image Processing Error: {str(img_err)}"
             
-    # Text Prompt Add Karein
     parts.append({"text": prompt})
-    
-    payload = {
-        "contents": [{
-            "parts": parts
-        }]
-    }
+    payload = {"contents": [{"parts": parts}]}
     
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=60)
         if response.status_code == 200:
             res_json = response.json()
-            try:
-                return res_json["candidates"][0]["content"]["parts"][0]["text"]
-            except (KeyError, IndexErrors):
-                return "⚠️ Response format error. Gemini API se proper text response nahi mila."
+            return res_json["candidates"][0]["content"]["parts"][0]["text"]
         else:
             return f"Gemini API Error ({response.status_code}): {response.text}"
     except requests.exceptions.Timeout:
@@ -380,9 +324,8 @@ def call_ai(prompt, image=None):
     except Exception as e:
         return f"Network Error: {str(e)}"
 
-
 # =========================================================
-# 7. LOGIN / REGISTER SCREEN
+# 7. AUTH SCREEN (LOGIN & REGISTER)
 # =========================================================
 if not st.session_state.get("is_logged_in", False):
     col_l1, col_l2, col_l3 = st.columns([1, 2, 1])
@@ -403,8 +346,6 @@ if not st.session_state.get("is_logged_in", False):
                 if user:
                     st.session_state.is_logged_in = True
                     st.session_state.user_data = {"username": user[0], "email": user[1]}
-                    token = create_session_token(user[0])
-                    cookies.set(SESSION_COOKIE, token, max_age=60*60*24*365)
                     st.success("Login Success!")
                     st.rerun()
                 else:
@@ -474,8 +415,6 @@ with st.sidebar:
                         st.error("Order creation failed. Check Razorpay credentials.")
                 if st.session_state.get("rzp_order"):
                     render_razorpay_checkout(st.session_state.rzp_order, username, get_app_url())
-            else:
-                st.info("Direct online payment ke alawa aap Passcode se bhi activate kar sakte hain.")
             
             admin_code = st.text_input("Admin Passcode:", key="side_admin_key")
             if st.button("Activate via Passcode", use_container_width=True):
@@ -487,8 +426,6 @@ with st.sidebar:
                     st.error("❌ Invalid Passcode!")
 
     if st.button("🚪 Logout Account", use_container_width=True):
-        delete_session_token(cookies.get(SESSION_COOKIE))
-        cookies.set(SESSION_COOKIE, "", max_age=0)
         st.session_state.is_logged_in = False
         st.session_state.user_data = None
         st.rerun()
@@ -500,7 +437,7 @@ if st.session_state.get("rzp_result"):
         st.code(f"Your Passcode Key: {pk}")
     st.session_state.rzp_result = None
 
-# --- TOP HEADER BAR ---
+# --- TOP NAVIGATION MENU BAR ---
 h_col1, h_col2, h_col3 = st.columns([1, 4, 1])
 with h_col1:
     with st.popover("☰ Menu"):
@@ -524,7 +461,9 @@ with h_col3:
 
 st.divider()
 
-# --- PAGE 1: CHAT ---
+# =========================================================
+# PAGE 1: CHAT INTERFACE & PROBLEM SOLVER
+# =========================================================
 if st.session_state.active_page == "chat":
     if not st.session_state.messages:
         st.markdown(f"<h3 style='text-align: center; margin-top: 20px;'>Hi {username}! 👋</h3>", unsafe_allow_html=True)
@@ -597,8 +536,6 @@ if st.session_state.active_page == "chat":
                     st.error("Order create nahi ho saka.")
             if st.session_state.get("rzp_order"):
                 render_razorpay_checkout(st.session_state.rzp_order, username, get_app_url())
-        else:
-            st.info("Payment setup karne ke liye secrets.toml mein Razorpay Keys dalein.")
     else:
         user_prompt = st.chat_input("Kuch bhi puchein...")
         status_text = "Plan Mode: Pro (Unlimited Access)" if is_pro else f"Plan Mode: Free Tier ({remaining_questions} Questions Left Today)"
@@ -613,7 +550,9 @@ if st.session_state.active_page == "chat":
                 st.session_state.messages.append({"role": "assistant", "content": res})
             st.rerun()
 
-# --- PAGE 2: ABOUT ---
+# =========================================================
+# PAGE 2: ABOUT APP & PLANS
+# =========================================================
 elif st.session_state.active_page == "about":
     st.markdown(f"## 📱 About {app_display_name} & Membership Plans")
     st.write("Student AI platform specially built for students to solve exam questions, generate revision notes, and analyze PDF study materials instantly.")
@@ -662,7 +601,6 @@ elif st.session_state.active_page == "about":
             """)
         st.divider()
 
-        st.info("✅ Direct Razorpay payment auto-verify hoti hai.")
         if RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
             if st.button("💳 Pay ₹79 Securely Now", type="primary", use_container_width=True):
                 order = create_razorpay_order(username)
@@ -672,8 +610,6 @@ elif st.session_state.active_page == "about":
                     st.error("Order creation failed.")
             if st.session_state.get("rzp_order"):
                 render_razorpay_checkout(st.session_state.rzp_order, username, get_app_url())
-        else:
-            st.warning("Razorpay keys absent. QR Payment ya Passcode use karein.")
         
         admin_code = st.text_input("Admin Passcode (special):", key="about_admin_key")
         if st.button("⚡ Activate via Admin Passcode", use_container_width=True):
@@ -688,12 +624,13 @@ elif st.session_state.active_page == "about":
         if passcode_key:
             st.code(f"Passcode Key: {passcode_key}")
 
-# --- PAGE 3: DEVELOPER ---
+# =========================================================
+# PAGE 3: DEVELOPER PROFILE
+# =========================================================
 elif st.session_state.active_page == "developer":
     st.markdown("## 👨‍💻 Developer Profile")
     st.divider()
     dev_col1, dev_col2 = st.columns([1, 2])
-    PROFILE_IMG_URL = "https://raw.githubusercontent.com/Gaurav7474675/student-ai/main/profile.jpeg"
     with dev_col1:
         st.markdown(f"""
         <div style="text-align: center; padding: 20px; background-color: #121212; border-radius: 12px; border: 1px solid #222;">
@@ -709,6 +646,6 @@ elif st.session_state.active_page == "developer":
 
         - **Project Name**: Student AI / Student AI Pro
         - **Mission**: Making exam preparation and study note extraction effortless using AI models.
-        - **Tech Stack**: Python, Streamlit, OpenRouter API, SQLite3, Razorpay Integration.
+        - **Tech Stack**: Python, Streamlit, Google Gemini API, SQLite3, Razorpay Integration.
         """)
         st.link_button("💬 Contact Developer on WhatsApp", "https://wa.me/910000000000", use_container_width=True)
