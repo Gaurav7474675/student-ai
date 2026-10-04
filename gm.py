@@ -324,8 +324,7 @@ if rzp_payment and rzp_order and rzp_sig:
         st.rerun()
 
 # =========================================================
-# =========================================================
-# 6. AI ENGINE (DIRECT GEMINI API)
+# 6. AI ENGINE (DIRECT GEMINI API - FIXED)
 # =========================================================
 def call_ai(prompt, image=None):
     # Secrets se Gemini key uthayein
@@ -336,8 +335,8 @@ def call_ai(prompt, image=None):
     
     gemini_key = gemini_key.strip().replace('"', '').replace("'", "")
     
-    # Gemini 2.5 Flash API Endpoint
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
+    # Official stable Gemini Flash model endpoint
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
     headers = {"Content-Type": "application/json"}
     
     parts = []
@@ -370,7 +369,10 @@ def call_ai(prompt, image=None):
         response = requests.post(url, headers=headers, json=payload, timeout=60)
         if response.status_code == 200:
             res_json = response.json()
-            return res_json["candidates"][0]["content"]["parts"][0]["text"]
+            try:
+                return res_json["candidates"][0]["content"]["parts"][0]["text"]
+            except (KeyError, IndexErrors):
+                return "⚠️ Response format error. Gemini API se proper text response nahi mila."
         else:
             return f"Gemini API Error ({response.status_code}): {response.text}"
     except requests.exceptions.Timeout:
