@@ -280,7 +280,7 @@ if rzp_payment and rzp_order and rzp_sig:
         st.rerun()
 
 # =========================================================
-# 6. AI ENGINE (UPDATED TO GEMINI 3.8 FLASH)
+# FAST AI ENGINE (OPTIMIZED FOR SPEED)
 # =========================================================
 def call_ai(prompt, image=None):
     gemini_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
@@ -290,40 +290,44 @@ def call_ai(prompt, image=None):
     
     gemini_key = str(gemini_key).strip().replace('"', '').replace("'", "")
     
-    # Official Gemini 3.8 Flash API Endpoint
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key={gemini_key}"
+    # Direct fast endpoint
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
     headers = {"Content-Type": "application/json"}
     
     parts = []
-    
     if image:
         try:
             buffered = io.BytesIO()
-            image.save(buffered, format="PNG")
+            # Fast image compression for speed
+            image.thumbnail((800, 800))
+            image.save(buffered, format="JPEG", quality=70)
             img_str = base64.b64encode(buffered.getvalue()).decode()
             parts.append({
                 "inline_data": {
-                    "mime_type": "image/png",
+                    "mime_type": "image/jpeg",
                     "data": img_str
                 }
             })
         except Exception as img_err:
             return f"Image Processing Error: {str(img_err)}"
             
-    parts.append({"text": prompt})
+    # Text Payload Trimming for fast token response
+    parts.append({"text": prompt[:10000]})
     payload = {"contents": [{"parts": parts}]}
     
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=60)
+        # Reduced timeout to 15 seconds for faster feedback
+        response = requests.post(url, headers=headers, json=payload, timeout=15)
         if response.status_code == 200:
             res_json = response.json()
             return res_json["candidates"][0]["content"]["parts"][0]["text"]
         else:
             return f"Gemini API Error ({response.status_code}): {response.text}"
     except requests.exceptions.Timeout:
-        return "⚠️ Timeout Error. Kripya punah prayas karein."
+        return "⚡ Connection Timed Out! Server busy hai, dubara send karein."
     except Exception as e:
         return f"Network Error: {str(e)}"
+
 
 # =========================================================
 # 7. AUTH SCREEN (LOGIN & REGISTER)
