@@ -331,7 +331,7 @@ def call_ai(prompt, image=None):
     gemini_key = str(gemini_key).strip().replace('"', '').replace("'", "")
     
     # Updated to gemini-2.5-flash to completely eliminate 404 Endpoint Errors
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
     headers = {"Content-Type": "application/json"}
     
     parts = []
