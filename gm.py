@@ -320,7 +320,10 @@ if rzp_payment and rzp_order and rzp_sig:
         st.rerun()
 
 # =========================================================
-# 6. FAST & RELIABLE AI ENGINE (UPDATED TO GEMINI 2.5 FLASH)
+#from google import genai
+
+# =========================================================
+# 6. OFFICIAL GOOGLE GENAI SDK ENGINE (FIXED FOR ALL KEY TYPES)
 # =========================================================
 def call_ai(prompt, image=None):
     gemini_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
@@ -330,49 +333,35 @@ def call_ai(prompt, image=None):
     
     gemini_key = str(gemini_key).strip().replace('"', '').replace("'", "")
     
-    # Updated to gemini-2.5-flash to completely eliminate 404 Endpoint Errors
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
-    headers = {"Content-Type": "application/json"}
-    
-    parts = []
-    if image:
-        try:
-            buffered = io.BytesIO()
-            image.thumbnail((800, 800))
-            image.save(buffered, format="JPEG", quality=75)
-            img_str = base64.b64encode(buffered.getvalue()).decode()
-            parts.append({
-                "inline_data": {
-                    "mime_type": "image/jpeg",
-                    "data": img_str
-                }
-            })
-        except Exception as img_err:
-            return f"Image Processing Error: {str(img_err)}"
-            
-    parts.append({"text": prompt[:15000]})
-    payload = {"contents": [{"parts": parts}]}
-    
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=25)
-        if response.status_code == 200:
-            res_json = response.json()
-            return res_json["candidates"][0]["content"]["parts"][0]["text"]
-        elif response.status_code == 404:
-            # Automatic Fallback Model
-            fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
-            res_fallback = requests.post(fallback_url, headers=headers, json=payload, timeout=25)
-            if res_fallback.status_code == 200:
-                return res_fallback.json()["candidates"][0]["content"]["parts"][0]["text"]
-            return "Gemini API Error (404): Please verify your API Key in Streamlit Secrets."
-        elif response.status_code == 503:
-            return "⚠️ Server busy (503 High Demand). Kripya 10 second baad dobara try karein."
-        else:
-            return f"Gemini API Error ({response.status_code}): {response.text}"
-    except requests.exceptions.Timeout:
-        return "⚠️ Timeout Error. Request lene mein zyaada time laga, dobara try karein."
+        # Initialize official Google GenAI Client
+        client = genai.Client(api_key=gemini_key)
+        
+        contents = []
+        if image:
+            contents.append(image)
+        contents.append(prompt[:15000])
+        
+        # Using standard gemini-2.5-flash or gemini-1.5-flash via official SDK
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=contents
+        )
+        
+        return response.text
+
     except Exception as e:
-        return f"Network Error: {str(e)}"
+        # Fallback to 1.5 flash if 2.5 has any issue
+        try:
+            client = genai.Client(api_key=gemini_key)
+            response = client.models.generate_content(
+                model="gemini-1.5-flash",
+                contents=contents
+            )
+            return response.text
+        except Exception as err:
+            return f"Gemini API Error: {str(err)}"
+
 
 # =========================================================
 # 7. AUTH SCREEN (LOGIN & REGISTER)
