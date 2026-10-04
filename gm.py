@@ -19,7 +19,7 @@ st.set_page_config(
     page_title="Student AI",
     page_icon="🛡️",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
 st.markdown("""
@@ -320,7 +320,7 @@ if rzp_payment and rzp_order and rzp_sig:
         st.rerun()
 
 # =========================================================
-# 6. FAST & RELIABLE AI ENGINE (FIXED GEMINI ENDPOINT)
+# 6. FAST & RELIABLE AI ENGINE (UPDATED TO GEMINI 2.5 FLASH)
 # =========================================================
 def call_ai(prompt, image=None):
     gemini_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
@@ -330,8 +330,8 @@ def call_ai(prompt, image=None):
     
     gemini_key = str(gemini_key).strip().replace('"', '').replace("'", "")
     
-    # FIXED: Updated endpoint format to avoid 404 error
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={gemini_key}"
+    # Updated to gemini-2.5-flash to completely eliminate 404 Endpoint Errors
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
     headers = {"Content-Type": "application/json"}
     
     parts = []
@@ -359,12 +359,12 @@ def call_ai(prompt, image=None):
             res_json = response.json()
             return res_json["candidates"][0]["content"]["parts"][0]["text"]
         elif response.status_code == 404:
-            # Fallback URL attempt
-            fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={gemini_key}"
+            # Automatic Fallback Model
+            fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
             res_fallback = requests.post(fallback_url, headers=headers, json=payload, timeout=25)
             if res_fallback.status_code == 200:
                 return res_fallback.json()["candidates"][0]["content"]["parts"][0]["text"]
-            return f"Gemini API Error (404): Model Endpoint Invalid. Please verify your Gemini API key."
+            return "Gemini API Error (404): Please verify your API Key in Streamlit Secrets."
         elif response.status_code == 503:
             return "⚠️ Server busy (503 High Demand). Kripya 10 second baad dobara try karein."
         else:
@@ -440,16 +440,6 @@ with st.sidebar:
         st.session_state.active_page = "developer"; st.rerun()
     st.divider()
 
-    # SECRET ADMIN PANEL (Visible when logged in as "admin")
-    if username.lower() == "admin":
-        st.markdown("### 🔑 Admin Key Generator")
-        if st.button("Generate New Unique Pro Key", type="primary", use_container_width=True):
-            gen_key = generate_unique_pro_key()
-            st.success("New Key Generated!")
-            st.code(gen_key)
-            st.caption("Is key ko copy karke user ko Telegram par bhej dein.")
-        st.divider()
-
     with st.expander("💳 Upgrade / Activate Pro", expanded=not is_pro):
         if is_pro:
             st.success(f"PRO Active! Days Left: {days_left}")
@@ -496,7 +486,7 @@ if st.session_state.get("rzp_result"):
         st.code(f"Your Passcode Key: {pk}")
     st.session_state.rzp_result = None
 
-# --- TOP NAVIGATION MENU BAR ---
+# --- TOP NAVIGATION MENU BAR (WITH DIRECT ADMIN PANEL) ---
 h_col1, h_col2, h_col3 = st.columns([1, 4, 1])
 with h_col1:
     with st.popover("☰ Menu"):
@@ -507,6 +497,16 @@ with h_col1:
             st.session_state.active_page = "about"; st.rerun()
         if st.button("👨‍💻 Developer Profile", key="pop_dev", use_container_width=True):
             st.session_state.active_page = "developer"; st.rerun()
+
+        # ADMIN KEY GENERATOR DIRECTLY VISIBLE IN MENU
+        if username.lower() in ["admin", "@admin"]:
+            st.divider()
+            st.markdown("### 🔑 Admin Key Generator")
+            if st.button("Generate New Pro Key", type="primary", key="pop_gen_key", use_container_width=True):
+                gen_key = generate_unique_pro_key()
+                st.success("New Key Generated!")
+                st.code(gen_key)
+
 with h_col2:
     pro_tag = '<span class="pro-badge">PRO</span>' if is_pro else ''
     st.markdown(f"<div style='text-align:center;'><span class='app-title-text'>🛡️ {app_display_name}</span>{pro_tag}</div>", unsafe_allow_html=True)
