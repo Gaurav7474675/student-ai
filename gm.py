@@ -10,7 +10,6 @@ import sqlite3
 import hashlib
 import hmac
 import secrets
-from google import genai
 from datetime import datetime, timedelta
 
 # =========================================================
@@ -20,7 +19,7 @@ st.set_page_config(
     page_title="Student AI",
     page_icon="🛡️",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 st.markdown("""
@@ -88,6 +87,7 @@ def init_db():
         c.execute('''CREATE TABLE IF NOT EXISTS usage_tracker (
             username TEXT, usage_date TEXT, count INTEGER DEFAULT 0,
             PRIMARY KEY (username, usage_date))''')
+        # Table for storing one-time single-use Pro Passcodes
         c.execute('''CREATE TABLE IF NOT EXISTS pro_keys (
             key_code TEXT PRIMARY KEY, is_used INTEGER DEFAULT 0, 
             used_by TEXT, created_at TEXT)''')
@@ -109,6 +109,7 @@ def redeem_pro_key(user_code, username):
     """Redeems passcode and enforces single-use policy"""
     code_clean = user_code.strip().upper()
     
+    # Check Master Admin Key
     if code_clean == PRO_PASSCODE:
         expiry_date, _ = update_pro_status(username, code_clean)
         return True, f"🎉 Master Admin Key Accepted! PRO Active till {expiry_date}"
@@ -124,6 +125,7 @@ def redeem_pro_key(user_code, username):
         if row[0] == 1:
             return False, f"❌ Ye Key Pehle Hi Kisi User (@{row[1]}) Dwara Use Ho Chuki Hai!"
 
+        # Key is valid -> mark as used and activate Pro
         conn.execute("UPDATE pro_keys SET is_used=1, used_by=? WHERE key_code=?", (username, code_clean))
         conn.commit()
         
@@ -248,6 +250,7 @@ def process_verified_payment(order_id, payment_id, signature, username):
         except Exception as e:
             return False, f"❌ Error: {str(e)}", None
 
+        # Auto-generate unique key for Razorpay payment
         auto_key = f"PRO-RZP-{secrets.token_hex(4).upper()}"
         created_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         conn.execute("INSERT INTO pro_keys (key_code, is_used, used_by, created_at) VALUES (?, 1, ?, ?)",
@@ -320,10 +323,8 @@ if rzp_payment and rzp_order and rzp_sig:
         st.session_state.rzp_result = (ok, msg, pk)
         st.rerun()
 
-from google import genai
-
 # =========================================================
-# 6. OFFICIAL GOOGLE GENAI SDK ENGINE (FIXED FOR ALL KEY TYPES)
+# 6. FAST & RELIABLE AI ENGINE
 # =========================================================
 def call_ai(prompt, image=None):
     gemini_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
@@ -332,35 +333,41 @@ def call_ai(prompt, image=None):
         return "⚠️ Gemini API Key Missing! Secrets.toml mein GEMINI_API_KEY set karein."
     
     gemini_key = str(gemini_key).strip().replace('"', '').replace("'", "")
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
+    headers = {"Content-Type": "application/json"}
+    
+    parts = []
+    if image:
+        try:
+            buffered = io.BytesIO()
+            image.thumbnail((800, 800))
+            image.save(buffered, format="JPEG", quality=75)
+            img_str = base64.b64encode(buffered.getvalue()).decode()
+            parts.append({
+                "inline_data": {
+                    "mime_type": "image/jpeg",
+                    "data": img_str
+                }
+            })
+        except Exception as img_err:
+            return f"Image Processing Error: {str(img_err)}"
+            
+    parts.append({"text": prompt[:15000]})
+    payload = {"contents": [{"parts": parts}]}
     
     try:
-        # Initialize official Google GenAI Client
-        client = genai.Client(api_key=gemini_key)
-        
-        contents = []
-        if image:
-            contents.append(image)
-        contents.append(prompt[:15000])
-        
-        # Using standard gemini-2.5-flash or gemini-1.5-flash via official SDK
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=contents
-        )
-        
-        return response.text
-
+        response = requests.post(url, headers=headers, json=payload, timeout=20)
+        if response.status_code == 200:
+            res_json = response.json()
+            return res_json["candidates"][0]["content"]["parts"][0]["text"]
+        elif response.status_code == 503:
+            return "⚠️ Server busy (503 High Demand). Kripya 10 second baad dobara try karein."
+        else:
+            return f"Gemini API Error ({response.status_code}): {response.text}"
+    except requests.exceptions.Timeout:
+        return "⚠️ Timeout Error. Request lene mein zyaada time laga, dobara try karein."
     except Exception as e:
-        # Fallback to 1.5 flash if 2.5 has any issue
-        try:
-            client = genai.Client(api_key=gemini_key)
-            response = client.models.generate_content(
-                model="gemini-1.5-flash",
-                contents=contents
-            )
-            return response.text
-        except Exception as err:
-            return f"Gemini API Error: {str(err)}"
+        return f"Network Error: {str(e)}"
 
 # =========================================================
 # 7. AUTH SCREEN (LOGIN & REGISTER)
@@ -428,23 +435,11 @@ with st.sidebar:
         st.session_state.active_page = "developer"; st.rerun()
     st.divider()
 
-    with st.expander("💳 Upgrade / Activate Pro", expanded=not is_pro):
-        if is_pro:
-            st.success(f"PRO Active! Days Left: {days_left}")
-            if passcode_key:
-                st.code(f"Passcode: {passcode_key}")
-        else:
-            st.write("🔥 **Unlock Unlimited Questions & Photo Solver!**")
-            st.image(PAYMENT_QR_URL, caption="Scan QR to Pay ₹79", use_container_width=True)
-            st.link_button("📲 Send Screenshot on Telegram", TELEGRAM_LINK, use_container_width=True)
-
-            if RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
-                st.divider()
-                if st.button("💳 Pay ₹79 Securely (Auto-Verify)", type="primary", use_container_width=True):
-                    order = create_razorpay_order(username)
-                    if order:
-                        st.session_state.rzp_order = order
-                    else:
-                        st.error("Order creation failed.")
-                if st.session_state.get("rzp_order"):
-                    render_razorpay_checkout(st.session_state.rzp_order, usern)
+    # SECRET ADMIN PANEL TO GENERATE KEYS
+    if username.lower() == "admin":
+        st.markdown("### 🔑 Admin Key Generator")
+        if st.button("Generate New Unique Pro Key", type="primary", use_container_width=True):
+            gen_key = generate_unique_pro_key()
+            st.success("New Key Generated!")
+            st.code(gen_key)
+            st.caption("Is key ko code me paste kare")
