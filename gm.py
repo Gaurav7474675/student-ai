@@ -13,7 +13,6 @@ import secrets
 import json
 from datetime import datetime, timedelta
 from streamlit_cookies_controller import CookieController
-from google import genai  # <-- YAHAN ADD KAREIN
 
 # =========================================================
 # 1. PAGE CONFIG & UI STYLES
@@ -54,7 +53,7 @@ st.markdown("""
 # =========================================================
 # 2. CONFIG & SECRETS
 # =========================================================
-api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
+api_key = st.secrets.get("OPENROUTER_API_KEY") or st.secrets.get("GEMINI_API_KEY") or os.environ.get("OPENROUTER_API_KEY")
 PRO_PASSCODE = st.secrets.get("PRO_PASSCODE") or os.environ.get("PRO_PASSCODE") or "GMCYBER2026"
 
 RAZORPAY_KEY_ID = st.secrets.get("RAZORPAY_KEY_ID") or os.environ.get("RAZORPAY_KEY_ID", "")
@@ -91,7 +90,6 @@ def init_db():
         c.execute('''CREATE TABLE IF NOT EXISTS payments (
             order_id TEXT PRIMARY KEY, username TEXT, payment_id TEXT,
             signature TEXT, status TEXT, timestamp TEXT)''')
-        # Questions usage tracking table
         c.execute('''CREATE TABLE IF NOT EXISTS usage_tracker (
             username TEXT, usage_date TEXT, count INTEGER DEFAULT 0,
             PRIMARY KEY (username, usage_date))''')
@@ -180,7 +178,6 @@ def check_user_pro_validity(username):
     except Exception:
         return False, "Free Tier", 0, None
 
-# --- DAILY QUESTION COUNTER LOGIC ---
 def get_today_question_count(username):
     today = datetime.now().strftime("%Y-%m-%d")
     with get_db_connection() as conn:
@@ -327,54 +324,88 @@ if rzp_payment and rzp_order and rzp_sig:
         st.rerun()
 
 # =========================================================
-
-# =========================================================
-# 6. AI ENGINE (DIRECT GOOGLE GEMINI)
+# 6. AI ENGINE (OPENROUTER REFINED)
 # =========================================================
 def call_ai(prompt, image=None):
-    if not api_key:
-        return "⚠️ Secrets mein GEMINI_API_KEY missing hai!"
-        
-    try:
-        # Direct Google Gemini Client Initialization
-        client = genai.Client(api_key=api_key.strip())
-        
-        contents = [prompt]
-        if image:
-            contents.append(image)
+    if not api_key or "YOUR_" in api_key:
+        return "⚠️ API Key Missing or Invalid! Secrets.toml mein valid OPENROUTER_API_KEY set karein."
+    
+    headers = {
+        "Authorization": f"Bearer {api_key.strip()}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://streamlit.app",
+        "X-Title": "Student AI"
+    }
+    
+    content_payload = [{"type": "text", "text": prompt}]
+    if image:
+        try:
+            buffered = io.BytesIO()
+            image.save(buffered, format="PNG")
+            img_str = base64.b64encode(buffered.getvalue()).decode()
+            content_payload.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_str}"}})
+        except Exception as img_err:
+            return f"Image Processing Error: {str(img_err)}"
             
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=contents
-        )
-        return response.text
+    payload = {
+        "model": "google/gemini-2.5-flash",
+        "messages": [{"role": "user", "content": content_payload}],
+        "max_tokens": 2000
+    }
+    
+    try:
+        response = requests.post("https://openrouter.ai/api/v1/chat/completions",
+                                 headers=headers, json=payload, timeout=60)
+        if response.status_code == 200:
+            return response.json()["choices"][0]["message"]["content"]
+        return f"API Error ({response.status_code}): {response.text}"
+    except requests.exceptions.Timeout:
+        return "⚠️ Timeout Error. Kripya punah prayas karein."
     except Exception as e:
-        return f"Gemini Error: {str(e)}"
+        return f"Network Error: {str(e)}"
 
 # =========================================================
-# 6. AI ENGINE (DIRECT GOOGLE GEMINI)
+# 7. LOGIN / REGISTER SCREEN
 # =========================================================
-def call_ai(prompt, image=None):
-    if not api_key:
-        return "⚠️ Secrets mein GEMINI_API_KEY missing hai!"
-        
-    try:
-        # Direct Google Gemini Client Initialization
-        client = genai.Client(api_key=api_key.strip())
-        
-        contents = [prompt]
-        if image:
-            contents.append(image)
-            
-        # Standard stable model name
-        response = client.models.generate_content(
-            model='gemini-1.5-flash',
-            contents=contents
-        )
-        return response.text
-    except Exception as e:
-        return f"Gemini Error: {str(e)}"
+if not st.session_state.get("is_logged_in", False):
+    col_l1, col_l2, col_l3 = st.columns([1, 2, 1])
+    with col_l2:
+        st.markdown("<h2 style='text-align:center;'>🛡️ Student AI</h2>", unsafe_allow_html=True)
+        st.caption("<p style='text-align:center;'>Sign in to start learning</p>", unsafe_allow_html=True)
+        st.divider()
 
+        auth_tab1, auth_tab2 = st.tabs(["🔐 Sign In", "📝 Create Account"])
+
+        with auth_tab1:
+            with st.form(key="login_form"):
+                login_user = st.text_input("👤 Username")
+                login_pass = st.text_input("🔑 Password", type="password")
+                submit_login = st.form_submit_button("Log In", type="primary", use_container_width=True)
+            if submit_login:
+                user = validate_login(login_user.strip(), login_pass.strip())
+                if user:
+                    st.session_state.is_logged_in = True
+                    st.session_state.user_data = {"username": user[0], "email": user[1]}
+                    token = create_session_token(user[0])
+                    cookies.set(SESSION_COOKIE, token, max_age=60*60*24*365)
+                    st.success("Login Success!")
+                    st.rerun()
+                else:
+                    st.error("❌ Invalid Credentials!")
+
+        with auth_tab2:
+            with st.form(key="reg_form"):
+                reg_email = st.text_input("📧 Email")
+                reg_user = st.text_input("Username")
+                reg_pass = st.text_input("Password", type="password")
+                submit_reg = st.form_submit_button("Sign Up", type="primary", use_container_width=True)
+            if submit_reg:
+                if reg_user and reg_pass and reg_email:
+                    success, msg = register_user(reg_user.strip(), reg_pass.strip(), reg_email.strip())
+                    (st.success if success else st.error)(msg)
+                else:
+                    st.error("Sabhi fields bharein!")
+    st.stop()
 
 # =========================================================
 # 8. MAIN APP DASHBOARD
@@ -383,7 +414,6 @@ username = st.session_state.user_data["username"]
 is_pro, expiry_info, days_left, passcode_key = check_user_pro_validity(username)
 app_display_name = "Student AI Pro" if is_pro else "Student AI"
 
-# Check usage counts
 used_questions = get_today_question_count(username)
 remaining_questions = max(0, MAX_FREE_QUESTIONS - used_questions)
 
@@ -410,13 +440,12 @@ with st.sidebar:
         else:
             st.write("🔥 **Unlock Unlimited Direct Questions, Unlimited PDF Pages & Photo Solver!**")
             
-            # --- QR CODE DISPLAY IN SIDEBAR ---
             st.image(PAYMENT_QR_URL, caption="Scan QR to Pay ₹79", use_container_width=True)
             st.markdown("""
             **Pro Version Activate Karne Ka Tareeka:**
-            1. Upar diye gaye QR Code par ₹79 ka payment karein.
-            2. Payment screenshot aur apna Username admin ko bhejein.
-            3. Admin dwara mila Passcode neeche daalkar instant Pro activate karein.
+            1. QR Code par ₹79 ka payment karein.
+            2. Screenshot aur Username admin ko bhejein.
+            3. Received Passcode neeche daal kar activate karein.
             """)
 
             if RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
@@ -532,7 +561,6 @@ if st.session_state.active_page == "chat":
                     except Exception as img_err:
                         st.error(f"Error processing image: {str(img_err)}")
 
-    # FREEMIUM LOCK LOGIC IMPLEMENTATION
     if not is_pro and used_questions >= MAX_FREE_QUESTIONS:
         st.error("🚨 **Daily Limit Reached!** Aapne aaj ke 5 Free Questions complete kar liye hain.")
         st.markdown("""
@@ -605,14 +633,13 @@ elif st.session_state.active_page == "about":
     if not is_pro:
         st.subheader("💳 Activate Pro Membership (Auto-Verified)")
         
-        # --- VIDEO MEIN CIRCLE KIYE GAYE SECTION PAR QR IMAGE ---
         qr_col1, qr_col2 = st.columns([1, 2])
         with qr_col1:
             st.image(PAYMENT_QR_URL, caption="Scan QR & Pay ₹79", width=220)
         with qr_col2:
             st.markdown("""
             ### 📌 How to Activate Pro Version:
-            1. **QR Code Scan Karein**: Diye gaye QR code ko kisi bhi UPI App (PhonePe / Google Pay / Paytm) se scan karke **₹79** ka payment karein.
+            1. **QR Code Scan Karein**: Diye gaye QR code ko kisi bhi UPI App se scan karke **₹79** ka payment karein.
             2. **Screenshot Bhejein**: Payment ka screenshot aur apna registered **Username** developer ko WhatsApp par bhejein.
             3. **Passcode Enter Karein**: Admin dwara praapt Passcode ko neeche box mein daal kar **Activate via Admin Passcode** par click karein.
             """)
