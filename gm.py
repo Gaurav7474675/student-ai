@@ -10,6 +10,7 @@ import sqlite3
 import hashlib
 import hmac
 import secrets
+from google import genai
 from datetime import datetime, timedelta
 
 # =========================================================
