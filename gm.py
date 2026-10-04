@@ -324,45 +324,60 @@ if rzp_payment and rzp_order and rzp_sig:
         st.rerun()
 
 # =========================================================
-# 6. AI ENGINE (OPENROUTER REFINED)
+# =========================================================
+# 6. AI ENGINE (DIRECT GEMINI API)
 # =========================================================
 def call_ai(prompt, image=None):
-    if not api_key or "YOUR_" in api_key:
-        return "⚠️ API Key Missing or Invalid! Secrets.toml mein valid OPENROUTER_API_KEY set karein."
+    # Secrets se Gemini key uthayein
+    gemini_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
     
-    headers = {
-        "Authorization": f"Bearer {api_key.strip()}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://streamlit.app",
-        "X-Title": "Student AI"
-    }
+    if not gemini_key or "YOUR_" in gemini_key:
+        return "⚠️ Gemini API Key Missing! Secrets.toml mein GEMINI_API_KEY set karein."
     
-    content_payload = [{"type": "text", "text": prompt}]
+    gemini_key = gemini_key.strip().replace('"', '').replace("'", "")
+    
+    # Gemini 2.5 Flash API Endpoint
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
+    headers = {"Content-Type": "application/json"}
+    
+    parts = []
+    
+    # Agar image upload hui hai
     if image:
         try:
             buffered = io.BytesIO()
             image.save(buffered, format="PNG")
             img_str = base64.b64encode(buffered.getvalue()).decode()
-            content_payload.append({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_str}"}})
+            parts.append({
+                "inline_data": {
+                    "mime_type": "image/png",
+                    "data": img_str
+                }
+            })
         except Exception as img_err:
             return f"Image Processing Error: {str(img_err)}"
             
+    # Text Prompt Add Karein
+    parts.append({"text": prompt})
+    
     payload = {
-        "model": "google/gemini-2.5-flash",
-        "messages": [{"role": "user", "content": content_payload}],
-        "max_tokens": 2000
+        "contents": [{
+            "parts": parts
+        }]
     }
     
     try:
-        response = requests.post("https://openrouter.ai/api/v1/chat/completions",
-                                 headers=headers, json=payload, timeout=60)
+        response = requests.post(url, headers=headers, json=payload, timeout=60)
         if response.status_code == 200:
-            return response.json()["choices"][0]["message"]["content"]
-        return f"API Error ({response.status_code}): {response.text}"
+            res_json = response.json()
+            return res_json["candidates"][0]["content"]["parts"][0]["text"]
+        else:
+            return f"Gemini API Error ({response.status_code}): {response.text}"
     except requests.exceptions.Timeout:
         return "⚠️ Timeout Error. Kripya punah prayas karein."
     except Exception as e:
         return f"Network Error: {str(e)}"
+
 
 # =========================================================
 # 7. LOGIN / REGISTER SCREEN
