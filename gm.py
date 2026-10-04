@@ -280,7 +280,7 @@ if rzp_payment and rzp_order and rzp_sig:
         st.rerun()
 
 # =========================================================
-# 6. AI ENGINE (DIRECT OFFICIAL GEMINI API)
+# 6. AI ENGINE (UPDATED GEMINI 2.5 FLASH API)
 # =========================================================
 def call_ai(prompt, image=None):
     gemini_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
@@ -290,7 +290,8 @@ def call_ai(prompt, image=None):
     
     gemini_key = str(gemini_key).strip().replace('"', '').replace("'", "")
     
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
+    # Updated to Gemini 2.5 Flash Endpoint
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}"
     headers = {"Content-Type": "application/json"}
     
     parts = []
@@ -320,9 +321,10 @@ def call_ai(prompt, image=None):
         else:
             return f"Gemini API Error ({response.status_code}): {response.text}"
     except requests.exceptions.Timeout:
-        return "⚠️ Timeout Error. Kripya punah prayas karein."
+        return "⚠️️ Timeout Error. Kripya punah prayas karein."
     except Exception as e:
         return f"Network Error: {str(e)}"
+
 
 # =========================================================
 # 7. AUTH SCREEN (LOGIN & REGISTER)
