@@ -57,6 +57,7 @@ RAZORPAY_KEY_ID = st.secrets.get("RAZORPAY_KEY_ID") or os.environ.get("RAZORPAY_
 RAZORPAY_KEY_SECRET = st.secrets.get("RAZORPAY_KEY_SECRET") or os.environ.get("RAZORPAY_KEY_SECRET", "")
 PRO_PRICE_PAISE = 7900  # ₹79
 
+TELEGRAM_LINK = "https://t.me/pintu9389"
 PAYMENT_QR_URL = "https://raw.githubusercontent.com/Gaurav7474675/student-ai/main/payment_qr.png"
 PROFILE_IMG_URL = "https://raw.githubusercontent.com/Gaurav7474675/student-ai/main/profile.jpeg"
 
@@ -64,16 +65,13 @@ DB_FILE = "users_database.db"
 MAX_FREE_QUESTIONS = 5
 
 # =========================================================
-# 3. DATABASE & USAGE TRACKING
+# 3. DATABASE & USAGE TRACKING WITH SINGLE-USE KEYS
 # =========================================================
 def get_db_connection():
     return sqlite3.connect(DB_FILE, timeout=15)
 
 def hash_password(password):
     return hashlib.sha256(password.encode('utf-8')).hexdigest()
-
-def generate_passcode():
-    return f"PRO-{secrets.token_hex(4).upper()}"
 
 def init_db():
     with get_db_connection() as conn:
@@ -89,9 +87,50 @@ def init_db():
         c.execute('''CREATE TABLE IF NOT EXISTS usage_tracker (
             username TEXT, usage_date TEXT, count INTEGER DEFAULT 0,
             PRIMARY KEY (username, usage_date))''')
+        # Table for storing one-time single-use Pro Passcodes
+        c.execute('''CREATE TABLE IF NOT EXISTS pro_keys (
+            key_code TEXT PRIMARY KEY, is_used INTEGER DEFAULT 0, 
+            used_by TEXT, created_at TEXT)''')
         conn.commit()
 
 init_db()
+
+def generate_unique_pro_key():
+    """Generates a random unique single-use key and saves to DB"""
+    new_key = f"PRO-{secrets.token_hex(4).upper()}"
+    created_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_db_connection() as conn:
+        conn.execute("INSERT INTO pro_keys (key_code, is_used, created_at) VALUES (?, 0, ?)",
+                     (new_key, created_time))
+        conn.commit()
+    return new_key
+
+def redeem_pro_key(user_code, username):
+    """Redeems passcode and enforces single-use policy"""
+    code_clean = user_code.strip().upper()
+    
+    # Check Master Admin Key
+    if code_clean == PRO_PASSCODE:
+        expiry_date, _ = update_pro_status(username, code_clean)
+        return True, f"🎉 Master Admin Key Accepted! PRO Active till {expiry_date}"
+
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        c.execute("SELECT is_used, used_by FROM pro_keys WHERE key_code=?", (code_clean,))
+        row = c.fetchone()
+        
+        if not row:
+            return False, "❌ Invalid Passcode! Key match nahi hui."
+        
+        if row[0] == 1:
+            return False, f"❌ Ye Key Pehle Hi Kisi User (@{row[1]}) Dwara Use Ho Chuki Hai!"
+
+        # Key is valid -> mark as used and activate Pro
+        conn.execute("UPDATE pro_keys SET is_used=1, used_by=? WHERE key_code=?", (username, code_clean))
+        conn.commit()
+        
+    expiry_date, _ = update_pro_status(username, code_clean)
+    return True, f"🎉 Success! Unique Passcode Verified. PRO Active till {expiry_date}"
 
 def register_user(username, password, email):
     try:
@@ -116,14 +155,13 @@ def validate_login(username, password):
     except Exception:
         return None
 
-def update_pro_status(username, days=30):
+def update_pro_status(username, key_used="SYSTEM_AUTO", days=30):
     expiry_date = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
-    new_passcode = generate_passcode()
     with get_db_connection() as conn:
         conn.execute("UPDATE users SET is_pro=1, pro_expiry=?, passcode=? WHERE username=?",
-                     (expiry_date, new_passcode, username))
+                     (expiry_date, key_used, username))
         conn.commit()
-    return expiry_date, new_passcode
+    return expiry_date, key_used
 
 def check_user_pro_validity(username):
     try:
@@ -212,10 +250,16 @@ def process_verified_payment(order_id, payment_id, signature, username):
         except Exception as e:
             return False, f"❌ Error: {str(e)}", None
 
+        # Auto-generate unique key for Razorpay payment
+        auto_key = f"PRO-RZP-{secrets.token_hex(4).upper()}"
+        created_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute("INSERT INTO pro_keys (key_code, is_used, used_by, created_at) VALUES (?, 1, ?, ?)",
+                     (auto_key, username, created_time))
         conn.execute("UPDATE payments SET payment_id=?, signature=?, status='PAID' WHERE order_id=?",
                      (payment_id, signature, order_id))
         conn.commit()
-    expiry, pass_key = update_pro_status(username, days=30)
+        
+    expiry, pass_key = update_pro_status(username, auto_key, days=30)
     return True, f"🎉 Payment Verified! Pro Active Till {expiry}!", pass_key
 
 def render_razorpay_checkout(order, username, app_url):
@@ -280,7 +324,7 @@ if rzp_payment and rzp_order and rzp_sig:
         st.rerun()
 
 # =========================================================
-# FAST AI ENGINE (OPTIMIZED FOR SPEED)
+# 6. FAST & RELIABLE AI ENGINE
 # =========================================================
 def call_ai(prompt, image=None):
     gemini_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
@@ -289,8 +333,6 @@ def call_ai(prompt, image=None):
         return "⚠️ Gemini API Key Missing! Secrets.toml mein GEMINI_API_KEY set karein."
     
     gemini_key = str(gemini_key).strip().replace('"', '').replace("'", "")
-    
-    # Direct fast endpoint
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
     headers = {"Content-Type": "application/json"}
     
@@ -298,9 +340,8 @@ def call_ai(prompt, image=None):
     if image:
         try:
             buffered = io.BytesIO()
-            # Fast image compression for speed
             image.thumbnail((800, 800))
-            image.save(buffered, format="JPEG", quality=70)
+            image.save(buffered, format="JPEG", quality=75)
             img_str = base64.b64encode(buffered.getvalue()).decode()
             parts.append({
                 "inline_data": {
@@ -311,23 +352,22 @@ def call_ai(prompt, image=None):
         except Exception as img_err:
             return f"Image Processing Error: {str(img_err)}"
             
-    # Text Payload Trimming for fast token response
-    parts.append({"text": prompt[:10000]})
+    parts.append({"text": prompt[:15000]})
     payload = {"contents": [{"parts": parts}]}
     
     try:
-        # Reduced timeout to 15 seconds for faster feedback
-        response = requests.post(url, headers=headers, json=payload, timeout=15)
+        response = requests.post(url, headers=headers, json=payload, timeout=20)
         if response.status_code == 200:
             res_json = response.json()
             return res_json["candidates"][0]["content"]["parts"][0]["text"]
+        elif response.status_code == 503:
+            return "⚠️ Server busy (503 High Demand). Kripya 10 second baad dobara try karein."
         else:
             return f"Gemini API Error ({response.status_code}): {response.text}"
     except requests.exceptions.Timeout:
-        return "⚡ Connection Timed Out! Server busy hai, dubara send karein."
+        return "⚠️ Timeout Error. Request lene mein zyaada time laga, dobara try karein."
     except Exception as e:
         return f"Network Error: {str(e)}"
-
 
 # =========================================================
 # 7. AUTH SCREEN (LOGIN & REGISTER)
@@ -395,6 +435,16 @@ with st.sidebar:
         st.session_state.active_page = "developer"; st.rerun()
     st.divider()
 
+    # SECRET ADMIN PANEL TO GENERATE KEYS
+    if username.lower() == "admin":
+        st.markdown("### 🔑 Admin Key Generator")
+        if st.button("Generate New Unique Pro Key", type="primary", use_container_width=True):
+            gen_key = generate_unique_pro_key()
+            st.success("New Key Generated!")
+            st.code(gen_key)
+            st.caption("Is key ko copy karke user ko Telegram par bhej dein.")
+        st.divider()
+
     with st.expander("💳 Upgrade / Activate Pro", expanded=not is_pro):
         if is_pro:
             st.success(f"PRO Active! Days Left: {days_left}")
@@ -404,31 +454,37 @@ with st.sidebar:
             st.write("🔥 **Unlock Unlimited Direct Questions, Unlimited PDF Pages & Photo Solver!**")
             
             st.image(PAYMENT_QR_URL, caption="Scan QR to Pay ₹79", use_container_width=True)
-            st.markdown("""
+            st.markdown(f"""
             **Pro Version Activate Karne Ka Tareeka:**
             1. QR Code par ₹79 ka payment karein.
-            2. Screenshot aur Username admin ko bhejein.
-            3. Received Passcode neeche daal kar activate karein.
+            2. Screenshot aur Username [Telegram Channel]({TELEGRAM_LINK}) par bhejein.
+            3. Praapt Unique Passcode neeche daal kar activate karein.
             """)
+            st.link_button("📲 Send Screenshot on Telegram", TELEGRAM_LINK, use_container_width=True)
 
             if RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
+                st.divider()
                 if st.button("💳 Pay ₹79 Securely (Auto-Verify)", type="primary", use_container_width=True):
                     order = create_razorpay_order(username)
                     if order:
                         st.session_state.rzp_order = order
                     else:
-                        st.error("Order creation failed. Check Razorpay credentials.")
+                        st.error("Order creation failed.")
                 if st.session_state.get("rzp_order"):
                     render_razorpay_checkout(st.session_state.rzp_order, username, get_app_url())
             
-            admin_code = st.text_input("Admin Passcode:", key="side_admin_key")
+            st.divider()
+            admin_code = st.text_input("Enter Passcode Key:", key="side_admin_key")
             if st.button("Activate via Passcode", use_container_width=True):
-                if admin_code.strip() == PRO_PASSCODE:
-                    exp, pass_k = update_pro_status(username)
-                    st.success("🎉 Passcode Accepted! PRO Activated.")
-                    st.rerun()
+                if admin_code.strip():
+                    ok, msg = redeem_pro_key(admin_code, username)
+                    if ok:
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
                 else:
-                    st.error("❌ Invalid Passcode!")
+                    st.error("Passcode enter karein!")
 
     if st.button("🚪 Logout Account", use_container_width=True):
         st.session_state.is_logged_in = False
@@ -532,6 +588,7 @@ if st.session_state.active_page == "chat":
         </div>
         """, unsafe_allow_html=True)
         
+        st.link_button("📲 Get Pro Passcode via Telegram", TELEGRAM_LINK, use_container_width=True)
         if RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
             if st.button("👑 Unlock Unlimited Questions (Pay ₹79)", type="primary", use_container_width=True):
                 order = create_razorpay_order(username)
@@ -585,29 +642,30 @@ elif st.session_state.active_page == "about":
                 <li><b>Unlimited PDF Scanning</b>: Complete books & syllabus extract karein.</li>
                 <li><b>Photo Question Solver</b>: Math/Science photos ka instant answer.</li>
                 <li><b>Fast Response Speed</b>.</li>
-                <li><b>Secure Auto-Verified Payment</b>.</li>
+                <li><b>Secure Single-Use Key Verification</b>.</li>
             </ul>
         </div>
         """, unsafe_allow_html=True)
     st.divider()
 
     if not is_pro:
-        st.subheader("💳 Activate Pro Membership (Auto-Verified)")
+        st.subheader("💳 Activate Pro Membership")
         
         qr_col1, qr_col2 = st.columns([1, 2])
         with qr_col1:
             st.image(PAYMENT_QR_URL, caption="Scan QR & Pay ₹79", width=220)
         with qr_col2:
-            st.markdown("""
+            st.markdown(f"""
             ### 📌 How to Activate Pro Version:
             1. **QR Code Scan Karein**: Diye gaye QR code ko kisi bhi UPI App se scan karke **₹79** ka payment karein.
-            2. **Screenshot Bhejein**: Payment ka screenshot aur apna registered **Username** developer ko WhatsApp par bhejein.
-            3. **Passcode Enter Karein**: Admin dwara praapt Passcode ko neeche box mein daal kar **Activate via Admin Passcode** par click karein.
+            2. **Screenshot Bhejein**: Payment ka screenshot aur apna registered **Username** humare [Telegram Channel]({TELEGRAM_LINK}) par bhejein.
+            3. **Passcode Enter Karein**: Admin dwara praapt Unique Passcode ko neeche box mein daal kar **Activate** par click karein.
             """)
+            st.link_button("📲 Send Screenshot on Telegram", TELEGRAM_LINK, use_container_width=True)
         st.divider()
 
         if RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
-            if st.button("💳 Pay ₹79 Securely Now", type="primary", use_container_width=True):
+            if st.button("💳 Pay ₹79 Securely Now (Auto-Verify)", type="primary", use_container_width=True):
                 order = create_razorpay_order(username)
                 if order:
                     st.session_state.rzp_order = order
@@ -615,15 +673,19 @@ elif st.session_state.active_page == "about":
                     st.error("Order creation failed.")
             if st.session_state.get("rzp_order"):
                 render_razorpay_checkout(st.session_state.rzp_order, username, get_app_url())
+            st.divider()
         
-        admin_code = st.text_input("Admin Passcode (special):", key="about_admin_key")
-        if st.button("⚡ Activate via Admin Passcode", use_container_width=True):
-            if admin_code.strip() == PRO_PASSCODE:
-                exp, pass_k = update_pro_status(username)
-                st.success(f"🎉 Admin Passcode Accepted! PRO Active till {exp}")
-                st.rerun()
+        about_admin_code = st.text_input("Enter Passcode Key:", key="about_admin_key")
+        if st.button("⚡ Activate Pro Membership", use_container_width=True):
+            if about_admin_code.strip():
+                ok, msg = redeem_pro_key(about_admin_code, username)
+                if ok:
+                    st.success(msg)
+                    st.rerun()
+                else:
+                    st.error(msg)
             else:
-                st.error("❌ Invalid Admin Passcode!")
+                st.error("Passcode enter karein!")
     else:
         st.success(f"🎉 Pro Active! Days Left: {days_left}")
         if passcode_key:
@@ -653,4 +715,4 @@ elif st.session_state.active_page == "developer":
         - **Mission**: Making exam preparation and study note extraction effortless using AI models.
         - **Tech Stack**: Python, Streamlit, Google Gemini API, SQLite3, Razorpay Integration.
         """)
-        st.link_button("💬 Contact Developer on WhatsApp", "https://wa.me/910000000000", use_container_width=True)
+        st.link_button("📲 Join Official Telegram Channel", TELEGRAM_LINK, use_container_width=True)
