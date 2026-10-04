@@ -323,46 +323,36 @@ if rzp_payment and rzp_order and rzp_sig:
 # =========================================================
 #from google import genai
 
-# =========================================================
-# 6. OFFICIAL GOOGLE GENAI SDK ENGINE (FIXED FOR ALL KEY TYPES)
-# =========================================================
+# ==============================================================================
+# 6. OFFICIAL GOOGLE GENAI SDK ENGINE (FIXED)
+# ==============================================================================
 def call_ai(prompt, image=None):
-    gemini_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
-    
+    gemini_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY", "")
+
     if not gemini_key or "YOUR_" in gemini_key:
         return "⚠️ Gemini API Key Missing! Secrets.toml mein GEMINI_API_KEY set karein."
-    
+
     gemini_key = str(gemini_key).strip().replace('"', '').replace("'", "")
-    
+
     try:
         # Initialize official Google GenAI Client
         client = genai.Client(api_key=gemini_key)
-        
+
         contents = []
         if image:
             contents.append(image)
-        contents.append(prompt[:15000])
-        
-        # Using standard gemini-2.5-flash or gemini-1.5-flash via official SDK
+        contents.append(str(prompt)[:15000])
+
+        # Always use official working model
         response = client.models.generate_content(
             model="gemini-2.5-flash",
             contents=contents
         )
-        
         return response.text
 
     except Exception as e:
-        # Fallback to 1.5 flash if 2.5 has any issue
-        try:
-            client = genai.Client(api_key=gemini_key)
-            response = client.models.generate_content(
-                model="gemini-1.5-flash",
-                contents=contents
-            )
-            return response.text
-        except Exception as err:
-            return f"Gemini API Error: {str(err)}"
-
+        return f"Gemini API Error: {str(e)}"
+y
 
 # =========================================================
 # 7. AUTH SCREEN (LOGIN & REGISTER)
