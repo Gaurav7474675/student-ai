@@ -87,7 +87,6 @@ def init_db():
         c.execute('''CREATE TABLE IF NOT EXISTS usage_tracker (
             username TEXT, usage_date TEXT, count INTEGER DEFAULT 0,
             PRIMARY KEY (username, usage_date))''')
-        # Table for storing one-time single-use Pro Passcodes
         c.execute('''CREATE TABLE IF NOT EXISTS pro_keys (
             key_code TEXT PRIMARY KEY, is_used INTEGER DEFAULT 0, 
             used_by TEXT, created_at TEXT)''')
@@ -109,7 +108,6 @@ def redeem_pro_key(user_code, username):
     """Redeems passcode and enforces single-use policy"""
     code_clean = user_code.strip().upper()
     
-    # Check Master Admin Key
     if code_clean == PRO_PASSCODE:
         expiry_date, _ = update_pro_status(username, code_clean)
         return True, f"🎉 Master Admin Key Accepted! PRO Active till {expiry_date}"
@@ -125,7 +123,6 @@ def redeem_pro_key(user_code, username):
         if row[0] == 1:
             return False, f"❌ Ye Key Pehle Hi Kisi User (@{row[1]}) Dwara Use Ho Chuki Hai!"
 
-        # Key is valid -> mark as used and activate Pro
         conn.execute("UPDATE pro_keys SET is_used=1, used_by=? WHERE key_code=?", (username, code_clean))
         conn.commit()
         
@@ -250,7 +247,6 @@ def process_verified_payment(order_id, payment_id, signature, username):
         except Exception as e:
             return False, f"❌ Error: {str(e)}", None
 
-        # Auto-generate unique key for Razorpay payment
         auto_key = f"PRO-RZP-{secrets.token_hex(4).upper()}"
         created_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         conn.execute("INSERT INTO pro_keys (key_code, is_used, used_by, created_at) VALUES (?, 1, ?, ?)",
@@ -324,7 +320,7 @@ if rzp_payment and rzp_order and rzp_sig:
         st.rerun()
 
 # =========================================================
-# 6. FAST & RELIABLE AI ENGINE
+# 6. FAST & RELIABLE AI ENGINE (FIXED GEMINI ENDPOINT)
 # =========================================================
 def call_ai(prompt, image=None):
     gemini_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
@@ -333,7 +329,9 @@ def call_ai(prompt, image=None):
         return "⚠️ Gemini API Key Missing! Secrets.toml mein GEMINI_API_KEY set karein."
     
     gemini_key = str(gemini_key).strip().replace('"', '').replace("'", "")
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
+    
+    # FIXED: Updated endpoint format to avoid 404 error
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={gemini_key}"
     headers = {"Content-Type": "application/json"}
     
     parts = []
@@ -356,10 +354,17 @@ def call_ai(prompt, image=None):
     payload = {"contents": [{"parts": parts}]}
     
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=20)
+        response = requests.post(url, headers=headers, json=payload, timeout=25)
         if response.status_code == 200:
             res_json = response.json()
             return res_json["candidates"][0]["content"]["parts"][0]["text"]
+        elif response.status_code == 404:
+            # Fallback URL attempt
+            fallback_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={gemini_key}"
+            res_fallback = requests.post(fallback_url, headers=headers, json=payload, timeout=25)
+            if res_fallback.status_code == 200:
+                return res_fallback.json()["candidates"][0]["content"]["parts"][0]["text"]
+            return f"Gemini API Error (404): Model Endpoint Invalid. Please verify your Gemini API key."
         elif response.status_code == 503:
             return "⚠️ Server busy (503 High Demand). Kripya 10 second baad dobara try karein."
         else:
@@ -435,7 +440,7 @@ with st.sidebar:
         st.session_state.active_page = "developer"; st.rerun()
     st.divider()
 
-    # SECRET ADMIN PANEL TO GENERATE KEYS
+    # SECRET ADMIN PANEL (Visible when logged in as "admin")
     if username.lower() == "admin":
         st.markdown("### 🔑 Admin Key Generator")
         if st.button("Generate New Unique Pro Key", type="primary", use_container_width=True):
@@ -451,15 +456,8 @@ with st.sidebar:
             if passcode_key:
                 st.code(f"Passcode: {passcode_key}")
         else:
-            st.write("🔥 **Unlock Unlimited Direct Questions, Unlimited PDF Pages & Photo Solver!**")
-            
+            st.write("🔥 **Unlock Unlimited Questions & Photo Solver!**")
             st.image(PAYMENT_QR_URL, caption="Scan QR to Pay ₹79", use_container_width=True)
-            st.markdown(f"""
-            **Pro Version Activate Karne Ka Tareeka:**
-            1. QR Code par ₹79 ka payment karein.
-            2. Screenshot aur Username [Telegram Channel]({TELEGRAM_LINK}) par bhejein.
-            3. Praapt Unique Passcode neeche daal kar activate karein.
-            """)
             st.link_button("📲 Send Screenshot on Telegram", TELEGRAM_LINK, use_container_width=True)
 
             if RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
@@ -583,21 +581,11 @@ if st.session_state.active_page == "chat":
         st.markdown("""
         <div style="background-color: #1E1010; border: 2px solid #FF4D4D; border-radius: 12px; padding: 20px; text-align: center; margin-top: 10px; margin-bottom: 25px;">
             <h2 style="color: #FF4D4D; margin-top: 0;">🔒 Upgrade to Pro to Continue</h2>
-            <p style="color: #CCCCCC; font-size: 15px;">Aaj ki daily limit (5 Questions) poori ho chuki hai. Unlimited questions, Photo Question Solver, aur full PDF scanning ke liye abhi <b>Pro Upgrade</b> karein!</p>
+            <p style="color: #CCCCCC; font-size: 15px;">Aaj ki daily limit (5 Questions) poori ho chuki hai. Unlimited questions ke liye Pro Upgrade karein!</p>
             <h3 style="color: #FFD700;">Kewal ₹79 / Month</h3>
         </div>
         """, unsafe_allow_html=True)
-        
         st.link_button("📲 Get Pro Passcode via Telegram", TELEGRAM_LINK, use_container_width=True)
-        if RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
-            if st.button("👑 Unlock Unlimited Questions (Pay ₹79)", type="primary", use_container_width=True):
-                order = create_razorpay_order(username)
-                if order:
-                    st.session_state.rzp_order = order
-                else:
-                    st.error("Order create nahi ho saka.")
-            if st.session_state.get("rzp_order"):
-                render_razorpay_checkout(st.session_state.rzp_order, username, get_app_url())
     else:
         user_prompt = st.chat_input("Kuch bhi puchein...")
         status_text = "Plan Mode: Pro (Unlimited Access)" if is_pro else f"Plan Mode: Free Tier ({remaining_questions} Questions Left Today)"
@@ -617,32 +605,30 @@ if st.session_state.active_page == "chat":
 # =========================================================
 elif st.session_state.active_page == "about":
     st.markdown(f"## 📱 About {app_display_name} & Membership Plans")
-    st.write("Student AI platform specially built for students to solve exam questions, generate revision notes, and analyze PDF study materials instantly.")
+    st.write("Student AI platform specially built for students to solve exam questions and analyze PDF study materials instantly.")
     st.divider()
 
     col_f1, col_f2 = st.columns(2)
     with col_f1:
         st.markdown("""
         <div class="feature-card">
-            <h3>🆓 Free Version (Student AI)</h3>
+            <h3>🆓 Free Version</h3>
             <ul>
-                <li><b>Daily Limit</b>: Maximum <b>5 Direct Questions/Day</b>.</li>
-                <li><b>PDF Page Limit</b>: Strictly <b>3 Pages</b> per document.</li>
-                <li><b>Standard Speed</b>.</li>
-                <li><b>Photo Solver</b>: Not Included.</li>
+                <li>Daily Limit: <b>5 Direct Questions/Day</b>.</li>
+                <li>PDF Page Limit: <b>3 Pages</b>.</li>
+                <li>Standard Speed.</li>
             </ul>
         </div>
         """, unsafe_allow_html=True)
     with col_f2:
         st.markdown("""
         <div class="feature-card" style="border: 1px solid #38BDF8;">
-            <h3 style="color: #38BDF8;">👑 Pro Version (Student AI Pro)</h3>
+            <h3 style="color: #38BDF8;">👑 Pro Version</h3>
             <ul>
-                <li><b>Unlimited Questions</b>: Koi daily limit nahi.</li>
-                <li><b>Unlimited PDF Scanning</b>: Complete books & syllabus extract karein.</li>
-                <li><b>Photo Question Solver</b>: Math/Science photos ka instant answer.</li>
-                <li><b>Fast Response Speed</b>.</li>
-                <li><b>Secure Single-Use Key Verification</b>.</li>
+                <li><b>Unlimited Questions</b>.</li>
+                <li><b>Unlimited PDF Scanning</b>.</li>
+                <li><b>Photo Question Solver</b>.</li>
+                <li><b>Single-Use Key Protection</b>.</li>
             </ul>
         </div>
         """, unsafe_allow_html=True)
@@ -650,31 +636,9 @@ elif st.session_state.active_page == "about":
 
     if not is_pro:
         st.subheader("💳 Activate Pro Membership")
-        
-        qr_col1, qr_col2 = st.columns([1, 2])
-        with qr_col1:
-            st.image(PAYMENT_QR_URL, caption="Scan QR & Pay ₹79", width=220)
-        with qr_col2:
-            st.markdown(f"""
-            ### 📌 How to Activate Pro Version:
-            1. **QR Code Scan Karein**: Diye gaye QR code ko kisi bhi UPI App se scan karke **₹79** ka payment karein.
-            2. **Screenshot Bhejein**: Payment ka screenshot aur apna registered **Username** humare [Telegram Channel]({TELEGRAM_LINK}) par bhejein.
-            3. **Passcode Enter Karein**: Admin dwara praapt Unique Passcode ko neeche box mein daal kar **Activate** par click karein.
-            """)
-            st.link_button("📲 Send Screenshot on Telegram", TELEGRAM_LINK, use_container_width=True)
+        st.image(PAYMENT_QR_URL, caption="Scan QR & Pay ₹79", width=220)
+        st.link_button("📲 Send Screenshot on Telegram", TELEGRAM_LINK, use_container_width=True)
         st.divider()
-
-        if RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
-            if st.button("💳 Pay ₹79 Securely Now (Auto-Verify)", type="primary", use_container_width=True):
-                order = create_razorpay_order(username)
-                if order:
-                    st.session_state.rzp_order = order
-                else:
-                    st.error("Order creation failed.")
-            if st.session_state.get("rzp_order"):
-                render_razorpay_checkout(st.session_state.rzp_order, username, get_app_url())
-            st.divider()
-        
         about_admin_code = st.text_input("Enter Passcode Key:", key="about_admin_key")
         if st.button("⚡ Activate Pro Membership", use_container_width=True):
             if about_admin_code.strip():
@@ -686,10 +650,6 @@ elif st.session_state.active_page == "about":
                     st.error(msg)
             else:
                 st.error("Passcode enter karein!")
-    else:
-        st.success(f"🎉 Pro Active! Days Left: {days_left}")
-        if passcode_key:
-            st.code(f"Passcode Key: {passcode_key}")
 
 # =========================================================
 # PAGE 3: DEVELOPER PROFILE
@@ -697,22 +657,11 @@ elif st.session_state.active_page == "about":
 elif st.session_state.active_page == "developer":
     st.markdown("## 👨‍💻 Developer Profile")
     st.divider()
-    dev_col1, dev_col2 = st.columns([1, 2])
-    with dev_col1:
-        st.markdown(f"""
-        <div style="text-align: center; padding: 20px; background-color: #121212; border-radius: 12px; border: 1px solid #222;">
-            <img src="{PROFILE_IMG_URL}" style="width: 110px; height: 110px; border-radius: 50%; object-fit: cover; border: 2px solid #38BDF8; margin-bottom: 10px;">
-            <h3 style="margin-bottom: 0px;">Cyber Gaurav</h3>
-            <p style="color: #38BDF8; font-size: 14px; margin-top: 4px;">Lead Developer & AI Creator</p>
-        </div>
-        """, unsafe_allow_html=True)
-    with dev_col2:
-        st.markdown("""
-        ### About the Developer
-        **Cyber Gaurav** is a developer and student innovator dedicated to creating accessible AI tools for students.
-
-        - **Project Name**: Student AI / Student AI Pro
-        - **Mission**: Making exam preparation and study note extraction effortless using AI models.
-        - **Tech Stack**: Python, Streamlit, Google Gemini API, SQLite3, Razorpay Integration.
-        """)
-        st.link_button("📲 Join Official Telegram Channel", TELEGRAM_LINK, use_container_width=True)
+    st.markdown(f"""
+    <div style="text-align: center; padding: 20px; background-color: #121212; border-radius: 12px; border: 1px solid #222;">
+        <img src="{PROFILE_IMG_URL}" style="width: 110px; height: 110px; border-radius: 50%; object-fit: cover; border: 2px solid #38BDF8; margin-bottom: 10px;">
+        <h3 style="margin-bottom: 0px;">Cyber Gaurav</h3>
+        <p style="color: #38BDF8; font-size: 14px; margin-top: 4px;">Lead Developer & AI Creator</p>
+    </div>
+    """, unsafe_allow_html=True)
+    st.link_button("📲 Join Official Telegram Channel", TELEGRAM_LINK, use_container_width=True)
