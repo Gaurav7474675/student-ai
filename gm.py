@@ -321,8 +321,7 @@ if rzp_payment and rzp_order and rzp_sig:
         st.rerun()
 
 # ==============================================================================
-# ==============================================================================
-# OFFICIAL GOOGLE GENAI SDK ENGINE (FIXED WITH AUTO-RETRY)
+# OFFICIAL GOOGLE GENAI SDK ENGINE (RETRIEVAL & AUTO-RETRY FIXED)
 # ==============================================================================
 import time
 
@@ -333,13 +332,12 @@ def call_ai(prompt, image=None):
     if not gemini_key:
         return "⚠️ Secrets me GEMINI_API_KEY missing hai!"
     
-    # Extra quotes aur spaces safai
     gemini_key = str(gemini_key).strip().replace('"', '').replace("'", "")
     
-    # 2. Server Load / 503 High Demand Se Bachne Ke Liye Auto-Retry (Up to 3 Times)
-    for attempt in range(3):
+    # 2. Server 503 / Traffic High Demand Auto-Retry (Exponential Backoff)
+    max_retries = 3
+    for attempt in range(max_retries):
         try:
-            # Official GenAI Client Initialize Karein
             client = genai.Client(api_key=gemini_key)
             
             contents = []
@@ -347,20 +345,26 @@ def call_ai(prompt, image=None):
                 contents.append(image)
             contents.append(str(prompt)[:15000])
             
-            # Gemini 3.8 Flash Model Call
+            # Model Name Same Rakh Rahe Hain
             response = client.models.generate_content(
                 model="gemini-3.8-flash",
                 contents=contents
             )
-            return response.text
+            
+            if response and response.text:
+                return response.text
+            else:
+                raise Exception("Empty response received from API")
             
         except Exception as e:
-            # Server traffic/busy error aane par 2 second wait karke retry karega
-            if ("503" in str(e) or "UNAVAILABLE" in str(e)) and attempt < 2:
-                time.sleep(2)
+            err_msg = str(e)
+            # 503 / UNAVAILABLE / High Demand / API Error sab catch karke retry karega
+            if attempt < max_retries - 1:
+                time.sleep(2 * (attempt + 1))  # 2 sec, phir 4 sec wait karke auto-retry
                 continue
-            return f"Gemini API Error: {str(e)}"
-
+            
+            # Final fallback message after 3 failed attempts
+            return "⚠️ Google AI Server par abhi heavy load/traffic hai. Kripya 5 seconds baad dobara send karein!"
 
 # =========================================================
 # 7. AUTH SCREEN (LOGIN & REGISTER)
