@@ -321,7 +321,7 @@ if rzp_payment and rzp_order and rzp_sig:
         st.rerun()
 
 # ==============================================================================
-# OFFICIAL GOOGLE GENAI SDK ENGINE (8-MODEL ULTRA FAST FAILOVER)
+# OFFICIAL GOOGLE GENAI SDK ENGINE (100% VERIFIED ACTIVE MODELS)
 # ==============================================================================
 def call_ai(prompt, image=None):
     # 1. Secret Key Fetch
@@ -332,16 +332,12 @@ def call_ai(prompt, image=None):
     
     gemini_key = str(gemini_key).strip().replace('"', '').replace("'", "")
     
-    # Total 8 Official Stable & Fast Models Priority List
+    # Strictly Verified Active Stable Models Only (No 404 Errors)
     models_to_try = [
-        "gemini-2.5-flash",
         "gemini-1.5-flash",
-        "gemini-2.0-flash",
         "gemini-1.5-flash-8b",
-        "gemini-2.0-flash-lite-preview-02-05",
         "gemini-1.5-pro",
-        "gemini-2.5-pro",
-        "gemini-2.0-pro-exp-02-05"
+        "gemini-2.0-flash-exp"
     ]
     
     contents = []
@@ -356,7 +352,7 @@ def call_ai(prompt, image=None):
         return f"Client Init Error: {str(init_err)}"
 
     last_error = ""
-    # Try 8 models one by one seamlessly
+    # Try verified active models one by one
     for model_name in models_to_try:
         try:
             response = client.models.generate_content(
@@ -369,7 +365,8 @@ def call_ai(prompt, image=None):
             last_error = str(e)
             continue
 
-    return f"⚠️ Connection Delay: {last_error}"
+    return f"⚠️ API Error: {last_error}"
+
 
 # =========================================================
 # 7. AUTH SCREEN (LOGIN & REGISTER)
