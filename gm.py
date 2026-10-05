@@ -8,6 +8,7 @@ import io
 import sqlite3
 import hashlib
 import secrets
+from google import genai
 from datetime import datetime, timedelta
 
 # =========================================================
@@ -275,47 +276,38 @@ if ("is_logged_in" not in st.session_state or not st.session_state.is_logged_in)
     except Exception:
         pass
 
-# =========================================================
-# 4. AI PIPELINE ENGINE
-# =========================================================
+# ==============================================================================
+# OFFICIAL GOOGLE GENAI SDK ENGINE (FIXED FOR API KEYS)
+# ==============================================================================
 def call_ai(prompt, image=None):
-    if not api_key:
-        return "⚠️ API Key Missing! Kripya Streamlit Secrets mein GEMINI_API_KEY add karein."
-
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-
-    content_payload = [{"type": "text", "text": prompt}]
-
-    if image:
-        try:
-            buffered = io.BytesIO()
-            image.save(buffered, format="PNG")
-            img_str = base64.b64encode(buffered.getvalue()).decode()
-            content_payload.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:image/png;base64,{img_str}"}
-            })
-        except Exception as img_err:
-            return f"Image Processing Error: {str(img_err)}"
-
-    payload = {
-        "model": "google/gemini-2.5-flash",
-        "messages": [{"role": "user", "content": content_payload}],
-        "max_tokens": 2000
-    }
-
+    # 1. Secret Key Fetch Karein
+    gemini_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY", "")
+    
+    if not gemini_key:
+        return "⚠️ Secrets me GEMINI_API_KEY missing hai!"
+    
+    # Extra quotes aur spaces safai
+    gemini_key = str(gemini_key).strip().replace('"', '').replace("'", "")
+    
     try:
-        response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload, timeout=60)
-        if response.status_code == 200:
-            return response.json()["choices"][0]["message"]["content"]
-        return f"API Error ({response.status_code}): {response.text}"
-    except requests.exceptions.Timeout:
-        return "⚠️ Timeout Error: Server response lene mein zyada samay le raha hai. Kripya punah prayas karein."
+        # 2. Official GenAI Client Initialize Karein
+        client = genai.Client(api_key=gemini_key)
+        
+        contents = []
+        if image:
+            contents.append(image)
+        contents.append(str(prompt)[:15000])
+        
+        # 3. Direct Gemini 2.5 Flash Model Call
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=contents
+        )
+        return response.text
+        
     except Exception as e:
-        return f"Network Error: {str(e)}"
+        return f"Gemini API Error: {str(e)}"
+
 
 # =========================================================
 # 5. AUTHENTICATION MODULE
