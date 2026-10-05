@@ -496,25 +496,11 @@ with h_col1:
                 st.code(gen_key)
 
     # ==============================================================================
+# TOP NAVIGATION & HEADER DISPLAY (SINGLE MENU FIX)
 # ==============================================================================
-# TOP NAVIGATION & HEADER DISPLAY (FIXED UNIQUE KEYS)
-# ==============================================================================
-h_col1, h_col2, h_col3 = st.columns([1, 4, 1])
+h_col1, h_col2 = st.columns([4, 1])
 
 with h_col1:
-    with st.popover("☰ Menu"):
-        st.markdown("### Navigation Drawer")
-        if st.button("💬 Chat Interface", key="hdr_chat_btn", use_container_width=True):
-            st.session_state.active_page = "chat"
-            st.rerun()
-        if st.button("📱 About & Plans", key="hdr_about_btn", use_container_width=True):
-            st.session_state.active_page = "about"
-            st.rerun()
-        if st.button("👨‍💻 Developer Profile", key="hdr_dev_btn", use_container_width=True):
-            st.session_state.active_page = "developer"
-            st.rerun()
-
-with h_col2:
     if is_pro:
         st.markdown(f'''
             <div style="display: flex; align-items: center; justify-content: center; gap: 6px;">
@@ -535,7 +521,7 @@ with h_col2:
             </div>
         ''', unsafe_allow_html=True)
 
-with h_col3:
+with h_col2:
     with st.popover("⋮ More"):
         st.caption(f"User: @{username}")
         st.caption(f"Status: {'👑 PRO Active' if is_pro else '🆓 Free Plan'}")
@@ -545,6 +531,7 @@ with h_col3:
             st.rerun()
 
 st.divider()
+
 
 
 # =========================================================
