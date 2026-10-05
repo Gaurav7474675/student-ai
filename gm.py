@@ -344,7 +344,7 @@ def call_ai(prompt, image=None):
         
         # 3. Direct Gemini 2.5 Flash Model Call
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.8-flash",
             contents=contents
         )
         return response.text
