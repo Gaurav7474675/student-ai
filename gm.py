@@ -321,8 +321,11 @@ if rzp_payment and rzp_order and rzp_sig:
         st.rerun()
 
 # ==============================================================================
-# OFFICIAL GOOGLE GENAI SDK ENGINE (FIXED FOR API KEYS)
 # ==============================================================================
+# OFFICIAL GOOGLE GENAI SDK ENGINE (FIXED WITH AUTO-RETRY)
+# ==============================================================================
+import time
+
 def call_ai(prompt, image=None):
     # 1. Secret Key Fetch Karein
     gemini_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY", "")
@@ -333,24 +336,31 @@ def call_ai(prompt, image=None):
     # Extra quotes aur spaces safai
     gemini_key = str(gemini_key).strip().replace('"', '').replace("'", "")
     
-    try:
-        # 2. Official GenAI Client Initialize Karein
-        client = genai.Client(api_key=gemini_key)
-        
-        contents = []
-        if image:
-            contents.append(image)
-        contents.append(str(prompt)[:15000])
-        
-        # 3. Direct Gemini 2.5 Flash Model Call
-        response = client.models.generate_content(
-            model="gemini-3.8-flash",
-            contents=contents
-        )
-        return response.text
-        
-    except Exception as e:
-        return f"Gemini API Error: {str(e)}"
+    # 2. Server Load / 503 High Demand Se Bachne Ke Liye Auto-Retry (Up to 3 Times)
+    for attempt in range(3):
+        try:
+            # Official GenAI Client Initialize Karein
+            client = genai.Client(api_key=gemini_key)
+            
+            contents = []
+            if image:
+                contents.append(image)
+            contents.append(str(prompt)[:15000])
+            
+            # Gemini 3.8 Flash Model Call
+            response = client.models.generate_content(
+                model="gemini-3.8-flash",
+                contents=contents
+            )
+            return response.text
+            
+        except Exception as e:
+            # Server traffic/busy error aane par 2 second wait karke retry karega
+            if ("503" in str(e) or "UNAVAILABLE" in str(e)) and attempt < 2:
+                time.sleep(2)
+                continue
+            return f"Gemini API Error: {str(e)}"
+
 
 # =========================================================
 # 7. AUTH SCREEN (LOGIN & REGISTER)
