@@ -321,50 +321,40 @@ if rzp_payment and rzp_order and rzp_sig:
         st.rerun()
 
 # ==============================================================================
-# OFFICIAL GOOGLE GENAI SDK ENGINE (RETRIEVAL & AUTO-RETRY FIXED)
+# OFFICIAL GOOGLE GENAI SDK ENGINE (LIGHTNING FAST & AUTO-FALLBACK)
 # ==============================================================================
-import time
-
 def call_ai(prompt, image=None):
     # 1. Secret Key Fetch Karein
     gemini_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY", "")
     
     if not gemini_key:
-        return "⚠️ Secrets me GEMINI_API_KEY missing hai!"
+        return "⚠️️ Secrets me GEMINI_API_KEY missing hai!"
     
     gemini_key = str(gemini_key).strip().replace('"', '').replace("'", "")
     
-    # 2. Server 503 / Traffic High Demand Auto-Retry (Exponential Backoff)
-    max_retries = 3
-    for attempt in range(max_retries):
+    # Fast Models Priority List (Subah ke aur high-speed stable models)
+    models_to_try = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.0-flash", "gemini-3.8-flash"]
+    
+    contents = []
+    if image:
+        contents.append(image)
+    contents.append(str(prompt)[:15000])
+    
+    # Multi-Model Failover (Zero delay retry on backup model)
+    for model_name in models_to_try:
         try:
             client = genai.Client(api_key=gemini_key)
-            
-            contents = []
-            if image:
-                contents.append(image)
-            contents.append(str(prompt)[:15000])
-            
-            # Model Name Same Rakh Rahe Hain
             response = client.models.generate_content(
-                model="gemini-3.8-flash",
+                model=model_name,
                 contents=contents
             )
-            
             if response and response.text:
                 return response.text
-            else:
-                raise Exception("Empty response received from API")
-            
-        except Exception as e:
-            err_msg = str(e)
-            # 503 / UNAVAILABLE / High Demand / API Error sab catch karke retry karega
-            if attempt < max_retries - 1:
-                time.sleep(2 * (attempt + 1))  # 2 sec, phir 4 sec wait karke auto-retry
-                continue
-            
-            # Final fallback message after 3 failed attempts
-            return "⚠️ Google AI Server par abhi heavy load/traffic hai. Kripya 5 seconds baad dobara send karein!"
+        except Exception:
+            # Agar ek model par load/error aaye, toh instant agle model par request switch ho jayegi
+            continue
+
+    return "⚠️ Server busy hai, kripya ek baar dobara try karein!"
 
 # =========================================================
 # 7. AUTH SCREEN (LOGIN & REGISTER)
