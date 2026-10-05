@@ -321,40 +321,55 @@ if rzp_payment and rzp_order and rzp_sig:
         st.rerun()
 
 # ==============================================================================
-# OFFICIAL GOOGLE GENAI SDK ENGINE (LIGHTNING FAST & AUTO-FALLBACK)
+# OFFICIAL GOOGLE GENAI SDK ENGINE (8-MODEL ULTRA FAST FAILOVER)
 # ==============================================================================
 def call_ai(prompt, image=None):
-    # 1. Secret Key Fetch Karein
+    # 1. Secret Key Fetch
     gemini_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY", "")
     
     if not gemini_key:
-        return "⚠️️ Secrets me GEMINI_API_KEY missing hai!"
+        return "⚠️ Secrets me GEMINI_API_KEY missing hai!"
     
     gemini_key = str(gemini_key).strip().replace('"', '').replace("'", "")
     
-    # Fast Models Priority List (Subah ke aur high-speed stable models)
-    models_to_try = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.0-flash", "gemini-3.8-flash"]
+    # Total 8 Official Stable & Fast Models Priority List
+    models_to_try = [
+        "gemini-2.5-flash",
+        "gemini-1.5-flash",
+        "gemini-2.0-flash",
+        "gemini-1.5-flash-8b",
+        "gemini-2.0-flash-lite-preview-02-05",
+        "gemini-1.5-pro",
+        "gemini-2.5-pro",
+        "gemini-2.0-pro-exp-02-05"
+    ]
     
     contents = []
     if image:
         contents.append(image)
     contents.append(str(prompt)[:15000])
     
-    # Multi-Model Failover (Zero delay retry on backup model)
+    # Client Initialization
+    try:
+        client = genai.Client(api_key=gemini_key)
+    except Exception as init_err:
+        return f"Client Init Error: {str(init_err)}"
+
+    last_error = ""
+    # Try 8 models one by one seamlessly
     for model_name in models_to_try:
         try:
-            client = genai.Client(api_key=gemini_key)
             response = client.models.generate_content(
                 model=model_name,
                 contents=contents
             )
-            if response and response.text:
+            if response and hasattr(response, 'text') and response.text:
                 return response.text
-        except Exception:
-            # Agar ek model par load/error aaye, toh instant agle model par request switch ho jayegi
+        except Exception as e:
+            last_error = str(e)
             continue
 
-    return "⚠️ Server busy hai, kripya ek baar dobara try karein!"
+    return f"⚠️ Connection Delay: {last_error}"
 
 # =========================================================
 # 7. AUTH SCREEN (LOGIN & REGISTER)
