@@ -3,6 +3,7 @@ import streamlit.components.v1 as components
 import requests
 from pypdf import PdfReader
 from PIL import Image
+from google import genai
 import os
 import base64
 import io
