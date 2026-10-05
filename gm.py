@@ -496,34 +496,35 @@ with h_col1:
                 st.code(gen_key)
 
     # ==============================================================================
-# TOP NAVIGATION & HEADER DISPLAY (CLEAN PRO BADGE + DAYS COUNTER)
+# ==============================================================================
+# TOP NAVIGATION & HEADER DISPLAY (FIXED UNIQUE KEYS)
 # ==============================================================================
 h_col1, h_col2, h_col3 = st.columns([1, 4, 1])
 
 with h_col1:
     with st.popover("☰ Menu"):
         st.markdown("### Navigation Drawer")
-        if st.button("💬 Chat Interface", key="pop_chat", use_container_width=True):
+        if st.button("💬 Chat Interface", key="hdr_chat_btn", use_container_width=True):
             st.session_state.active_page = "chat"
             st.rerun()
-        if st.button("📱 About & Plans", key="pop_about", use_container_width=True):
+        if st.button("📱 About & Plans", key="hdr_about_btn", use_container_width=True):
             st.session_state.active_page = "about"
             st.rerun()
-        if st.button("👨‍💻 Developer Profile", key="pop_dev_drawer", use_container_width=True):
+        if st.button("👨‍💻 Developer Profile", key="hdr_dev_btn", use_container_width=True):
             st.session_state.active_page = "developer"
             st.rerun()
 
 with h_col2:
     if is_pro:
-        st.markdown('''
+        st.markdown(f'''
             <div style="display: flex; align-items: center; justify-content: center; gap: 6px;">
                 <span style="font-size: 20px; font-weight: 700;">🛡️ Student AI Pro</span>
                 <span class="pro-badge">PRO</span>
             </div>
             <div style="text-align: center; font-size: 12px; color: #00FF66; margin-top: 2px;">
-                ⏳ <b>{} Days Left</b>
+                ⏳ <b>{days_left} Days Left</b>
             </div>
-        '''.format(days_left), unsafe_allow_html=True)
+        ''', unsafe_allow_html=True)
     else:
         st.markdown('''
             <div style="display: flex; align-items: center; justify-content: center;">
@@ -539,7 +540,7 @@ with h_col3:
         st.caption(f"User: @{username}")
         st.caption(f"Status: {'👑 PRO Active' if is_pro else '🆓 Free Plan'}")
         st.divider()
-        if st.button("👨‍💻 Developer Profile", key="pop_dev_nav", use_container_width=True):
+        if st.button("👨‍💻 Developer Profile", key="pop_more_dev_btn", use_container_width=True):
             st.session_state.active_page = "developer"
             st.rerun()
 
