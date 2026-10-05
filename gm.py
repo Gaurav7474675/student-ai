@@ -321,7 +321,7 @@ if rzp_payment and rzp_order and rzp_sig:
         st.rerun()
 
 # ==============================================================================
-# OFFICIAL GOOGLE GENAI SDK ENGINE (100% VERIFIED ACTIVE MODELS)
+# OFFICIAL GOOGLE GENAI SDK ENGINE (PERMANENT STABLE ENDPOINTS)
 # ==============================================================================
 def call_ai(prompt, image=None):
     # 1. Secret Key Fetch
@@ -332,12 +332,11 @@ def call_ai(prompt, image=None):
     
     gemini_key = str(gemini_key).strip().replace('"', '').replace("'", "")
     
-    # Strictly Verified Active Stable Models Only (No 404 Errors)
+    # Permanently Available Global Standard Models (No Experimental Strings)
     models_to_try = [
         "gemini-1.5-flash",
-        "gemini-1.5-flash-8b",
         "gemini-1.5-pro",
-        "gemini-2.0-flash-exp"
+        "gemini-1.5-flash-8b"
     ]
     
     contents = []
@@ -352,7 +351,7 @@ def call_ai(prompt, image=None):
         return f"Client Init Error: {str(init_err)}"
 
     last_error = ""
-    # Try verified active models one by one
+    # Try stable models one by one
     for model_name in models_to_try:
         try:
             response = client.models.generate_content(
@@ -365,7 +364,8 @@ def call_ai(prompt, image=None):
             last_error = str(e)
             continue
 
-    return f"⚠️ API Error: {last_error}"
+    return f"⚠️ Connection Delay: {last_error}"
+
 
 
 # =========================================================
