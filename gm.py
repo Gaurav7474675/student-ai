@@ -499,14 +499,14 @@ with h_col2:
     pro_tag = '<span class="pro-badge">PRO</span>' if is_pro else ''
     st.markdown(f"<div style='text-align:center;'><span class='app-title-text'>🛡️ {app_display_name}</span>{pro_tag}</div>", unsafe_allow_html=True)
 with h_col3:
-    with st.popover("⋮ More"):
-        st.markdown(f"**User:** @{username}")
-        st.caption(f"Status: {'👑 PRO Active' if is_pro else '🆓 Free Plan'}")
-        st.divider()
-        if st.button("👨‍💻 Developer Profile", key="top_dev_btn", use_container_width=True):
-            st.session_state.active_page = "developer"; st.rerun()
+    st.caption(f"Status: {'👑 PRO Active' if is_pro else '🆓 Free Plan'}")
+    if is_pro:
+        st.markdown(f"⏳ **Days Left:** `{days_left} Days`")
+    with st.popover("More"):
+        if st.button("👨‍💻 Developer Profile", key="pop_dev"):
+            st.session_state.active_page = "developer"
+            st.rerun()
 
-st.divider()
 
 # =========================================================
 # PAGE 1: CHAT INTERFACE & PROBLEM SOLVER
