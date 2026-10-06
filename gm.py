@@ -320,46 +320,89 @@ if rzp_payment and rzp_order and rzp_sig:
         st.session_state.rzp_result = (ok, msg, pk)
         st.rerun()
 
-# ==============================================================================
-# ==============================================================================
-# OFFICIAL GOOGLE GENAI SDK ENGINE (FIXED WITH AUTO-RETRY)
-# ==============================================================================
+import os
 import time
+import streamlit as st
+from google import genai
+
+
+def get_gemini_client():
+    gemini_key = (
+        st.secrets.get("GEMINI_API_KEY")
+        or os.environ.get("GEMINI_API_KEY", "")
+    )
+
+    if not gemini_key:
+        return None
+
+    gemini_key = str(gemini_key).strip().replace('"', '').replace("'", "")
+
+    return genai.Client(api_key=gemini_key)
+
 
 def call_ai(prompt, image=None):
-    # 1. Secret Key Fetch Karein
-    gemini_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY", "")
-    
-    if not gemini_key:
-        return "⚠️ Secrets me GEMINI_API_KEY missing hai!"
-    
-    # Extra quotes aur spaces safai
-    gemini_key = str(gemini_key).strip().replace('"', '').replace("'", "")
-    
-    # 2. Server Load / 503 High Demand Se Bachne Ke Liye Auto-Retry (Up to 3 Times)
-    for attempt in range(3):
+
+    client = get_gemini_client()
+
+    if client is None:
+        return "⚠️ Gemini API key missing hai. Streamlit Secrets check karein."
+
+    contents = []
+
+    if image:
+        contents.append(image)
+
+    contents.append(str(prompt)[:15000])
+
+    # Sirf temporary server errors ke liye retry
+    max_retries = 3
+
+    for attempt in range(max_retries):
+
         try:
-            # Official GenAI Client Initialize Karein
-            client = genai.Client(api_key=gemini_key)
-            
-            contents = []
-            if image:
-                contents.append(image)
-            contents.append(str(prompt)[:15000])
-            
-            # Gemini 3.8 Flash Model Call
+
             response = client.models.generate_content(
                 model="gemini-3.8-flash",
                 contents=contents
             )
-            return response.text
-            
+
+            if response and response.text:
+                return response.text
+
+            return "⚠️ AI ne koi response nahi diya."
+
         except Exception as e:
-            # Server traffic/busy error aane par 2 second wait karke retry karega
-            if ("503" in str(e) or "UNAVAILABLE" in str(e)) and attempt < 2:
-                time.sleep(2)
+
+            error_text = str(e)
+
+            # --------------------------------
+            # 429 = QUOTA EXHAUSTED
+            # --------------------------------
+            if "429" in error_text or "RESOURCE_EXHAUSTED" in error_text:
+
+                return (
+                    "⚠️ **Student AI AI quota temporarily exhausted.**\n\n"
+                    "Google Gemini ki current API quota limit reach ho gayi hai. "
+                    "Ye Student AI ke 5-question limit ka issue nahi hai.\n\n"
+                    "Please try again after the Gemini quota resets."
+                )
+
+            # --------------------------------
+            # 503 = TEMPORARY SERVER ERROR
+            # --------------------------------
+            if (
+                ("503" in error_text or "UNAVAILABLE" in error_text)
+                and attempt < max_retries - 1
+            ):
+                time.sleep(2 * (attempt + 1))
                 continue
-            return f"Gemini API Error: {str(e)}"
+
+            # --------------------------------
+            # OTHER ERROR
+            # --------------------------------
+            return f"⚠️ Gemini service error: {error_text}"
+
+    return "⚠️ AI service temporarily unavailable. Please try again."
 
 # =========================================================
 # 7. AUTH SCREEN (LOGIN & REGISTER)
