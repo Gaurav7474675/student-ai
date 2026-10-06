@@ -321,50 +321,45 @@ if rzp_payment and rzp_order and rzp_sig:
         st.rerun()
 
 # ==============================================================================
-# OFFICIAL GOOGLE GENAI SDK ENGINE (PERMANENT STABLE ENDPOINTS)
 # ==============================================================================
+# OFFICIAL GOOGLE GENAI SDK ENGINE (FIXED WITH AUTO-RETRY)
+# ==============================================================================
+import time
+
 def call_ai(prompt, image=None):
-    # 1. Secret Key Fetch
+    # 1. Secret Key Fetch Karein
     gemini_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY", "")
     
     if not gemini_key:
         return "⚠️ Secrets me GEMINI_API_KEY missing hai!"
     
+    # Extra quotes aur spaces safai
     gemini_key = str(gemini_key).strip().replace('"', '').replace("'", "")
     
-    # Permanently Available Global Standard Models (No Experimental Strings)
-    models_to_try = [
-        "gemini-1.5-flash",
-        "gemini-1.5-pro",
-        "gemini-1.5-flash-8b"
-    ]
-    
-    contents = []
-    if image:
-        contents.append(image)
-    contents.append(str(prompt)[:15000])
-    
-    # Client Initialization
-    try:
-        client = genai.Client(api_key=gemini_key)
-    except Exception as init_err:
-        return f"Client Init Error: {str(init_err)}"
-
-    last_error = ""
-    # Try stable models one by one
-    for model_name in models_to_try:
+    # 2. Server Load / 503 High Demand Se Bachne Ke Liye Auto-Retry (Up to 3 Times)
+    for attempt in range(3):
         try:
+            # Official GenAI Client Initialize Karein
+            client = genai.Client(api_key=gemini_key)
+            
+            contents = []
+            if image:
+                contents.append(image)
+            contents.append(str(prompt)[:15000])
+            
+            # Gemini 3.8 Flash Model Call
             response = client.models.generate_content(
-                model=model_name,
+                model="gemini-3.8-flash",
                 contents=contents
             )
-            if response and hasattr(response, 'text') and response.text:
-                return response.text
+            return response.text
+            
         except Exception as e:
-            last_error = str(e)
-            continue
-
-    return f"⚠️ Connection Delay: {last_error}"
+            # Server traffic/busy error aane par 2 second wait karke retry karega
+            if ("503" in str(e) or "UNAVAILABLE" in str(e)) and attempt < 2:
+                time.sleep(2)
+                continue
+            return f"Gemini API Error: {str(e)}"
 
 
 
