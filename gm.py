@@ -321,24 +321,61 @@ if rzp_payment and rzp_order and rzp_sig:
         st.rerun()
 
  os
+iimport os
+ os
 i# ==============================================================================
 # OFFICIAL GOOGLE GENAI SDK ENGINE (FIXED WITH AUTO-RETRY)
 # ==============================================================================
 import time
+import streamlit as st
+from google import genai
+
+
+def get_gemini_client():
+    gemini_key = (
+        st.secrets.get("GEMINI_API_KEY")
+        or os.environ.get("GEMINI_API_KEY", "")
+    )
 
 def call_ai(prompt, image=None):
     # 1. Secret Key Fetch Karein
     gemini_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY", "")
     
     if not gemini_key:
+        return None
+
         return "⚠️ Secrets me GEMINI_API_KEY missing hai!"
     
     # Extra quotes aur spaces safai
     gemini_key = str(gemini_key).strip().replace('"', '').replace("'", "")
+
+    return genai.Client(api_key=gemini_key)
+
+
+def call_ai(prompt, image=None):
+
+    client = get_gemini_client()
+
+    if client is None:
+        return "⚠️ Gemini API key missing hai. Streamlit Secrets check karein."
+
+    contents = []
+
+    if image:
+        contents.append(image)
+
+    contents.append(str(prompt)[:15000])
+
+    # Sirf temporary server errors ke liye retry
+    max_retries = 3
+
+    for attempt in range(max_retries):
+
     
     # 2. Server Load / 503 High Demand Se Bachne Ke Liye Auto-Retry (Up to 3 Times)
     for attempt in range(3):
         try:
+
             # Official GenAI Client Initialize Karein
             client = genai.Client(api_key=gemini_key)
             
@@ -352,6 +389,12 @@ def call_ai(prompt, image=None):
                 model="gemini-3.8-flash",
                 contents=contents
             )
+
+            if response and response.text:
+                return response.text
+
+            return "⚠️ AI ne koi response nahi diya."
+
             return response.text
             
         except Exception as e:
@@ -361,24 +404,19 @@ def call_ai(prompt, image=None):
                 continue
             return f"Gemini API Error: {str(e)}"
 
+            error_text = str(e)
 
             # --------------------------------
-            # 503 = TEMPORARY SERVER ERROR
+            # 429 = QUOTA EXHAUSTED
             # --------------------------------
-            if (
-                ("503" in error_text or "UNAVAILABLE" in error_text)
-                and attempt < max_retries - 1
-            ):
-                time.sleep(2 * (attempt + 1))
-                continue
+            if "429" in error_text or "RESOURCE_EXHAUSTED" in error_text:
 
-            # --------------------------------
-            # OTHER ERROR
-            # --------------------------------
-            return f"⚠️ Gemini service error: {error_text}"
-
-    return "⚠️ AI service temporarily unavailable. Please try again."
-
+                return (
+                    "⚠️ **Student AI AI quota temporarily exhausted.**\n\n"
+                    "Google Gemini ki current API quota limit reach ho gayi hai. "
+                    "Ye Student AI ke 5-question limit ka issue nahi hai.\n\n"
+                    "Please try again after the Gemini quota resets."
+                )
 # =========================================================
 # 7. AUTH SCREEN (LOGIN & REGISTER)
 # =========================================================
