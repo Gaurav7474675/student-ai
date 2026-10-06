@@ -1,19 +1,17 @@
-import os
-import io
-import base64
-import sqlite3
-import hashlib
-import hmac
-import secrets
-import time
-from datetime import datetime, timedelta
-
 import streamlit as st
 import streamlit.components.v1 as components
 import requests
 from pypdf import PdfReader
 from PIL import Image
 from google import genai
+import os
+import base64
+import io
+import sqlite3
+import hashlib
+import hmac
+import secrets
+from datetime import datetime, timedelta
 
 # =========================================================
 # 1. PAGE CONFIG & STYLES
@@ -322,49 +320,89 @@ if rzp_payment and rzp_order and rzp_sig:
         st.session_state.rzp_result = (ok, msg, pk)
         st.rerun()
 
-# ==============================================================================
-# 6. OFFICIAL GOOGLE GENAI SDK ENGINE (FIXED & CLEAN)
-# ==============================================================================
-def call_ai(prompt, image=None):
-    gemini_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY", "")
-    
+import os
+import time
+import streamlit as st
+from google import genai
+
+
+def get_gemini_client():
+    gemini_key = (
+        st.secrets.get("GEMINI_API_KEY")
+        or os.environ.get("GEMINI_API_KEY", "")
+    )
+
     if not gemini_key:
-        return "⚠️ Secrets me GEMINI_API_KEY missing hai!"
-    
+        return None
+
     gemini_key = str(gemini_key).strip().replace('"', '').replace("'", "")
 
+    return genai.Client(api_key=gemini_key)
+
+
+def call_ai(prompt, image=None):
+
+    client = get_gemini_client()
+
+    if client is None:
+        return "⚠️ Gemini API key missing hai. Streamlit Secrets check karein."
+
     contents = []
+
     if image:
         contents.append(image)
+
     contents.append(str(prompt)[:15000])
 
-    models_to_try = ["gemini-1.5-flash", "models/gemini-1.5-flash"]
-    
-    for attempt in range(3):
+    # Sirf temporary server errors ke liye retry
+    max_retries = 3
+
+    for attempt in range(max_retries):
+
         try:
-            client = genai.Client(api_key=gemini_key)
-            
-            for m in models_to_try:
-                try:
-                    response = client.models.generate_content(
-                        model=m,
-                        contents=contents
-                    )
-                    if response and hasattr(response, 'text') and response.text:
-                        return response.text
-                except Exception:
-                    continue
-                    
+
+            response = client.models.generate_content(
+                model="gemini-3.8-flash",
+                contents=contents
+            )
+
+            if response and response.text:
+                return response.text
+
             return "⚠️ AI ne koi response nahi diya."
-            
+
         except Exception as e:
+
             error_text = str(e)
+
+            # --------------------------------
+            # 429 = QUOTA EXHAUSTED
+            # --------------------------------
             if "429" in error_text or "RESOURCE_EXHAUSTED" in error_text:
-                return "⚠️ **Student AI AI quota temporarily exhausted.**\nPlease try again later."
-            if ("503" in error_text or "UNAVAILABLE" in error_text) and attempt < 2:
-                time.sleep(2)
+
+                return (
+                    "⚠️ **Student AI AI quota temporarily exhausted.**\n\n"
+                    "Google Gemini ki current API quota limit reach ho gayi hai. "
+                    "Ye Student AI ke 5-question limit ka issue nahi hai.\n\n"
+                    "Please try again after the Gemini quota resets."
+                )
+
+            # --------------------------------
+            # 503 = TEMPORARY SERVER ERROR
+            # --------------------------------
+            if (
+                ("503" in error_text or "UNAVAILABLE" in error_text)
+                and attempt < max_retries - 1
+            ):
+                time.sleep(2 * (attempt + 1))
                 continue
-            return f"Gemini API Error: {error_text}"
+
+            # --------------------------------
+            # OTHER ERROR
+            # --------------------------------
+            return f"⚠️ Gemini service error: {error_text}"
+
+    return "⚠️ AI service temporarily unavailable. Please try again."
 
 # =========================================================
 # 7. AUTH SCREEN (LOGIN & REGISTER)
@@ -478,7 +516,30 @@ if st.session_state.get("rzp_result"):
         st.code(f"Your Passcode Key: {pk}")
     st.session_state.rzp_result = None
 
-# TOP NAVIGATION & HEADER DISPLAY
+# --- TOP NAVIGATION MENU BAR (WITH DIRECT ADMIN PANEL) ---
+h_col1, h_col2, h_col3 = st.columns([1, 4, 1])
+with h_col1:
+    with st.popover("☰ Menu"):
+        st.markdown("### Navigation Drawer")
+        if st.button("💬 Chat Interface", key="pop_chat", use_container_width=True):
+            st.session_state.active_page = "chat"; st.rerun()
+        if st.button("📱 About & Plans", key="pop_about", use_container_width=True):
+            st.session_state.active_page = "about"; st.rerun()
+        if st.button("👨‍💻 Developer Profile", key="pop_dev", use_container_width=True):
+            st.session_state.active_page = "developer"; st.rerun()
+
+        # ADMIN KEY GENERATOR DIRECTLY VISIBLE IN MENU
+        if username.lower() in ["admin", "@admin"]:
+            st.divider()
+            st.markdown("### 🔑 Admin Key Generator")
+            if st.button("Generate New Pro Key", type="primary", key="pop_gen_key", use_container_width=True):
+                gen_key = generate_unique_pro_key()
+                st.success("New Key Generated!")
+                st.code(gen_key)
+
+    # ==============================================================================
+# TOP NAVIGATION & HEADER DISPLAY (SINGLE MENU FIX)
+# ==============================================================================
 h_col1, h_col2 = st.columns([4, 1])
 
 with h_col1:
@@ -510,15 +571,10 @@ with h_col2:
         if st.button("👨‍💻 Developer Profile", key="pop_more_dev_btn", use_container_width=True):
             st.session_state.active_page = "developer"
             st.rerun()
-        if username.lower() in ["admin", "@admin"]:
-            st.divider()
-            st.markdown("### 🔑 Admin Key Generator")
-            if st.button("Generate New Pro Key", type="primary", key="pop_gen_key", use_container_width=True):
-                gen_key = generate_unique_pro_key()
-                st.success("New Key Generated!")
-                st.code(gen_key)
 
 st.divider()
+
+
 
 # =========================================================
 # PAGE 1: CHAT INTERFACE & PROBLEM SOLVER
