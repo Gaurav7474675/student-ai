@@ -361,8 +361,6 @@ def call_ai(prompt, image=None):
                 continue
             return f"Gemini API Error: {str(e)}"
 
-
-
 # =========================================================
 # 7. AUTH SCREEN (LOGIN & REGISTER)
 # =========================================================
