@@ -5,3 +5,4 @@ requests
 streamlit-cookies-controller
 streamlit-autorefresh
 google-genai
+psycopg2-binary
