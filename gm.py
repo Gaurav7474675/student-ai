@@ -7,7 +7,9 @@ from google import genai
 import os
 import base64
 import io
-import sqlite3
+import os
+import psycopg2
+import psycopg2.extras
 import hashlib
 import hmac
 import secrets
@@ -68,30 +70,33 @@ MAX_FREE_QUESTIONS = 5
 # =========================================================
 # 3. DATABASE & USAGE TRACKING WITH SINGLE-USE KEYS
 # =========================================================
+# PostgreSQL Connection Setup
+DB_URL = os.environ.get("DATABASE_URL") or st.secrets.get("DATABASE_URL")
+
 def get_db_connection():
-    return sqlite3.connect(DB_FILE, timeout=15)
+    return psycopg2.connect(DB_URL)
 
 def hash_password(password):
     return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
 def init_db():
     with get_db_connection() as conn:
-        c = conn.cursor()
-        c.execute('''CREATE TABLE IF NOT EXISTS users (
-            username TEXT PRIMARY KEY, password TEXT, email TEXT,
-            is_pro INTEGER DEFAULT 0, pro_expiry TEXT, passcode TEXT)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS transactions (
-            txn_id TEXT PRIMARY KEY, username TEXT, status TEXT, timestamp TEXT)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS payments (
-            order_id TEXT PRIMARY KEY, username TEXT, payment_id TEXT,
-            signature TEXT, status TEXT, timestamp TEXT)''')
-        c.execute('''CREATE TABLE IF NOT EXISTS usage_tracker (
-            username TEXT, usage_date TEXT, count INTEGER DEFAULT 0,
-            PRIMARY KEY (username, usage_date))''')
-        c.execute('''CREATE TABLE IF NOT EXISTS pro_keys (
-            key_code TEXT PRIMARY KEY, is_used INTEGER DEFAULT 0, 
-            used_by TEXT, created_at TEXT)''')
-        conn.commit()
+        with conn.cursor() as c:
+            c.execute('''CREATE TABLE IF NOT EXISTS users (
+                username TEXT PRIMARY KEY, password TEXT, email TEXT,
+                is_pro INTEGER DEFAULT 0, pro_expiry TEXT, passcode TEXT)''')
+            c.execute('''CREATE TABLE IF NOT EXISTS transactions (
+                txn_id TEXT PRIMARY KEY, username TEXT, status TEXT, timestamp TEXT)''')
+            c.execute('''CREATE TABLE IF NOT EXISTS payments (
+                order_id TEXT PRIMARY KEY, username TEXT, payment_id TEXT,
+                signature TEXT, status TEXT, timestamp TEXT)''')
+            c.execute('''CREATE TABLE IF NOT EXISTS usage_tracker (
+                username TEXT, usage_date TEXT, count INTEGER DEFAULT 0,
+                PRIMARY KEY (username, usage_date))''')
+            c.execute('''CREATE TABLE IF NOT EXISTS pro_keys (
+                key_code TEXT PRIMARY KEY, is_used INTEGER DEFAULT 0, 
+                used_by TEXT, created_at TEXT)''')
+            conn.commit()
 
 init_db()
 
