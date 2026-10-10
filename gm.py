@@ -54,10 +54,10 @@ st.markdown("""
 # =========================================================
 # 2. CONFIG & SECRETS
 # =========================================================
-PRO_PASSCODE = st.secrets.get("PRO_PASSCODE") or os.environ.get("PRO_PASSCODE") or "GMCYBER2026"
+PRO_PASSCODE = os.environ.get("PRO_PASSCODE")
+RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "")
+RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "")
 
-RAZORPAY_KEY_ID = st.secrets.get("RAZORPAY_KEY_ID") or os.environ.get("RAZORPAY_KEY_ID", "")
-RAZORPAY_KEY_SECRET = st.secrets.get("RAZORPAY_KEY_SECRET") or os.environ.get("RAZORPAY_KEY_SECRET", "")
 PRO_PRICE_PAISE = 7900  # ₹79
 
 TELEGRAM_LINK = "https://t.me/pintu9389"
