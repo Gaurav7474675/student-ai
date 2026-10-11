@@ -7,13 +7,13 @@ from google import genai
 import os
 import base64
 import io
-import os
 import psycopg2
 import psycopg2.extras
 import hashlib
 import hmac
 import secrets
 from datetime import datetime, timedelta
+import time
 
 # =========================================================
 # 1. PAGE CONFIG & STYLES
@@ -64,14 +64,12 @@ TELEGRAM_LINK = "https://t.me/pintu9389"
 PAYMENT_QR_URL = "https://raw.githubusercontent.com/Gaurav7474675/student-ai/main/payment_qr.png"
 PROFILE_IMG_URL = "https://raw.githubusercontent.com/Gaurav7474675/student-ai/main/profile.jpeg"
 
-DB_FILE = "users_database.db"
 MAX_FREE_QUESTIONS = 5
 
 # =========================================================
 # 3. DATABASE & USAGE TRACKING WITH SINGLE-USE KEYS
 # =========================================================
-# PostgreSQL Connection Setup
-DB_URL = os.environ.get("DATABASE_URL") or st.secrets.get("DATABASE_URL")
+DB_URL = os.environ.get("DATABASE_URL")
 
 def get_db_connection():
     return psycopg2.connect(DB_URL)
@@ -105,7 +103,7 @@ def generate_unique_pro_key():
     new_key = f"PRO-{secrets.token_hex(4).upper()}"
     created_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with get_db_connection() as conn:
-        conn.execute("INSERT INTO pro_keys (key_code, is_used, created_at) VALUES (?, 0, ?)",
+        conn.execute("INSERT INTO pro_keys (key_code, is_used, created_at) VALUES (%s, 0, %s)",
                      (new_key, created_time))
         conn.commit()
     return new_key
@@ -114,13 +112,13 @@ def redeem_pro_key(user_code, username):
     """Redeems passcode and enforces single-use policy"""
     code_clean = user_code.strip().upper()
     
-    if code_clean == PRO_PASSCODE:
+    if PRO_PASSCODE and code_clean == PRO_PASSCODE:
         expiry_date, _ = update_pro_status(username, code_clean)
         return True, f"🎉 Master Admin Key Accepted! PRO Active till {expiry_date}"
 
     with get_db_connection() as conn:
         c = conn.cursor()
-        c.execute("SELECT is_used, used_by FROM pro_keys WHERE key_code=?", (code_clean,))
+        c.execute("SELECT is_used, used_by FROM pro_keys WHERE key_code=%s", (code_clean,))
         row = c.fetchone()
         
         if not row:
@@ -129,7 +127,7 @@ def redeem_pro_key(user_code, username):
         if row[0] == 1:
             return False, f"❌ Ye Key Pehle Hi Kisi User (@{row[1]}) Dwara Use Ho Chuki Hai!"
 
-        conn.execute("UPDATE pro_keys SET is_used=1, used_by=? WHERE key_code=?", (username, code_clean))
+        conn.execute("UPDATE pro_keys SET is_used=1, used_by=%s WHERE key_code=%s", (username, code_clean))
         conn.commit()
         
     expiry_date, _ = update_pro_status(username, code_clean)
@@ -139,11 +137,11 @@ def register_user(username, password, email):
     try:
         with get_db_connection() as conn:
             c = conn.cursor()
-            c.execute("INSERT INTO users (username, password, email, is_pro) VALUES (?, ?, ?, 0)",
+            c.execute("INSERT INTO users (username, password, email, is_pro) VALUES (%s, %s, %s, 0)",
                       (username, hash_password(password), email))
             conn.commit()
         return True, "Account Created! Please Login."
-    except sqlite3.IntegrityError:
+    except psycopg2.errors.UniqueViolation:
         return False, "Username Already Exists!"
     except Exception as e:
         return False, f"Registration Error: {str(e)}"
@@ -152,7 +150,7 @@ def validate_login(username, password):
     try:
         with get_db_connection() as conn:
             c = conn.cursor()
-            c.execute("SELECT username, email FROM users WHERE username=? AND password=?",
+            c.execute("SELECT username, email FROM users WHERE username=%s AND password=%s",
                       (username, hash_password(password)))
             return c.fetchone()
     except Exception:
@@ -161,7 +159,7 @@ def validate_login(username, password):
 def update_pro_status(username, key_used="SYSTEM_AUTO", days=30):
     expiry_date = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
     with get_db_connection() as conn:
-        conn.execute("UPDATE users SET is_pro=1, pro_expiry=?, passcode=? WHERE username=?",
+        conn.execute("UPDATE users SET is_pro=1, pro_expiry=%s, passcode=%s WHERE username=%s",
                      (expiry_date, key_used, username))
         conn.commit()
     return expiry_date, key_used
@@ -170,13 +168,13 @@ def check_user_pro_validity(username):
     try:
         with get_db_connection() as conn:
             c = conn.cursor()
-            c.execute("SELECT is_pro, pro_expiry, passcode FROM users WHERE username=?", (username,))
+            c.execute("SELECT is_pro, pro_expiry, passcode FROM users WHERE username=%s", (username,))
             row = c.fetchone()
             if not row or row[0] == 0 or not row[1]:
                 return False, "Free Tier", 0, None
             expiry_dt = datetime.strptime(row[1], "%Y-%m-%d %H:%M:%S")
             if datetime.now() > expiry_dt:
-                conn.execute("UPDATE users SET is_pro=0 WHERE username=?", (username,))
+                conn.execute("UPDATE users SET is_pro=0 WHERE username=%s", (username,))
                 conn.commit()
                 return False, "Expired", 0, None
             days_left = (expiry_dt - datetime.now()).days
@@ -188,7 +186,7 @@ def get_today_question_count(username):
     today = datetime.now().strftime("%Y-%m-%d")
     with get_db_connection() as conn:
         c = conn.cursor()
-        c.execute("SELECT count FROM usage_tracker WHERE username=? AND usage_date=?", (username, today))
+        c.execute("SELECT count FROM usage_tracker WHERE username=%s AND usage_date=%s", (username, today))
         row = c.fetchone()
         return row[0] if row else 0
 
@@ -196,8 +194,12 @@ def increment_question_count(username):
     today = datetime.now().strftime("%Y-%m-%d")
     current = get_today_question_count(username)
     with get_db_connection() as conn:
-        conn.execute("INSERT OR REPLACE INTO usage_tracker (username, usage_date, count) VALUES (?, ?, ?)",
-                     (username, today, current + 1))
+        conn.execute("""
+            INSERT INTO usage_tracker (username, usage_date, count) 
+            VALUES (%s, %s, %s)
+            ON CONFLICT (username, usage_date) 
+            DO UPDATE SET count = EXCLUDED.count
+        """, (username, today, current + 1))
         conn.commit()
 
 # =========================================================
@@ -214,7 +216,7 @@ def create_razorpay_order(username):
         if resp.status_code == 200:
             order = resp.json()
             with get_db_connection() as conn:
-                conn.execute("INSERT OR REPLACE INTO payments (order_id, username, status, timestamp) VALUES (?, ?, 'CREATED', ?)",
+                conn.execute("INSERT OR REPLACE INTO payments (order_id, username, status, timestamp) VALUES (%s, %s, 'CREATED', %s)",
                              (order["id"], username, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
                 conn.commit()
             return order
@@ -236,7 +238,7 @@ def process_verified_payment(order_id, payment_id, signature, username):
         return False, "❌ Payment signature verification FAILED!", None
     with get_db_connection() as conn:
         c = conn.cursor()
-        c.execute("SELECT status FROM payments WHERE order_id=?", (order_id,))
+        c.execute("SELECT status FROM payments WHERE order_id=%s", (order_id,))
         row = c.fetchone()
         if row and row[0] == "PAID":
             return False, "⚠️ Ye payment pehle se verify ho chuka hai!", None
@@ -255,9 +257,9 @@ def process_verified_payment(order_id, payment_id, signature, username):
 
         auto_key = f"PRO-RZP-{secrets.token_hex(4).upper()}"
         created_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        conn.execute("INSERT INTO pro_keys (key_code, is_used, used_by, created_at) VALUES (?, 1, ?, ?)",
+        conn.execute("INSERT INTO pro_keys (key_code, is_used, used_by, created_at) VALUES (%s, 1, %s, %s)",
                      (auto_key, username, created_time))
-        conn.execute("UPDATE payments SET payment_id=?, signature=?, status='PAID' WHERE order_id=?",
+        conn.execute("UPDATE payments SET payment_id=%s, signature=%s, status='PAID' WHERE order_id=%s",
                      (payment_id, signature, order_id))
         conn.commit()
         
@@ -325,89 +327,44 @@ if rzp_payment and rzp_order and rzp_sig:
         st.session_state.rzp_result = (ok, msg, pk)
         st.rerun()
 
-import os
-import time
-import streamlit as st
-from google import genai
-
-
+# =========================================================
+# 6. GEMINI AI CLIENT
+# =========================================================
 def get_gemini_client():
-    gemini_key = (
-        st.secrets.get("GEMINI_API_KEY")
-        or os.environ.get("GEMINI_API_KEY", "")
-    )
-
+    gemini_key = os.environ.get("GEMINI_API_KEY", "")
     if not gemini_key:
         return None
-
     gemini_key = str(gemini_key).strip().replace('"', '').replace("'", "")
-
     return genai.Client(api_key=gemini_key)
 
-
 def call_ai(prompt, image=None):
-
     client = get_gemini_client()
-
     if client is None:
-        return "⚠️ Gemini API key missing hai. Streamlit Secrets check karein."
-
+        return "⚠️ Gemini API key missing hai. Render Environment Variables check karein."
     contents = []
-
     if image:
         contents.append(image)
-
     contents.append(str(prompt)[:15000])
 
-    # Sirf temporary server errors ke liye retry
     max_retries = 3
-
     for attempt in range(max_retries):
-
         try:
-
             response = client.models.generate_content(
-                model="gemini-3.8-flash",
+                model="gemini-2.5-flash",
                 contents=contents
             )
-
             if response and response.text:
                 return response.text
-
             return "⚠️ AI ne koi response nahi diya."
-
         except Exception as e:
-
             error_text = str(e)
-
-            # --------------------------------
-            # 429 = QUOTA EXHAUSTED
-            # --------------------------------
             if "429" in error_text or "RESOURCE_EXHAUSTED" in error_text:
-
-                return (
-                    "⚠️ **Student AI AI quota temporarily exhausted.**\n\n"
-                    "Google Gemini ki current API quota limit reach ho gayi hai. "
-                    "Ye Student AI ke 5-question limit ka issue nahi hai.\n\n"
-                    "Please try again after the Gemini quota resets."
-                )
-
-            # --------------------------------
-            # 503 = TEMPORARY SERVER ERROR
-            # --------------------------------
-            if (
-                ("503" in error_text or "UNAVAILABLE" in error_text)
-                and attempt < max_retries - 1
-            ):
+                return "⚠️ **Gemini AI quota temporarily exhausted.** Please try again later."
+            if ("503" in error_text or "UNAVAILABLE" in error_text) and attempt < max_retries - 1:
                 time.sleep(2 * (attempt + 1))
                 continue
-
-            # --------------------------------
-            # OTHER ERROR
-            # --------------------------------
             return f"⚠️ Gemini service error: {error_text}"
-
-    return "⚠️ AI service temporarily unavailable. Please try again."
+    return "⚠️ AI service temporarily unavailable."
 
 # =========================================================
 # 7. AUTH SCREEN (LOGIN & REGISTER)
@@ -521,30 +478,6 @@ if st.session_state.get("rzp_result"):
         st.code(f"Your Passcode Key: {pk}")
     st.session_state.rzp_result = None
 
-# --- TOP NAVIGATION MENU BAR (WITH DIRECT ADMIN PANEL) ---
-h_col1, h_col2, h_col3 = st.columns([1, 4, 1])
-with h_col1:
-    with st.popover("☰ Menu"):
-        st.markdown("### Navigation Drawer")
-        if st.button("💬 Chat Interface", key="pop_chat", use_container_width=True):
-            st.session_state.active_page = "chat"; st.rerun()
-        if st.button("📱 About & Plans", key="pop_about", use_container_width=True):
-            st.session_state.active_page = "about"; st.rerun()
-        if st.button("👨‍💻 Developer Profile", key="pop_dev", use_container_width=True):
-            st.session_state.active_page = "developer"; st.rerun()
-
-        # ADMIN KEY GENERATOR DIRECTLY VISIBLE IN MENU
-        if username.lower() in ["admin", "@admin"]:
-            st.divider()
-            st.markdown("### 🔑 Admin Key Generator")
-            if st.button("Generate New Pro Key", type="primary", key="pop_gen_key", use_container_width=True):
-                gen_key = generate_unique_pro_key()
-                st.success("New Key Generated!")
-                st.code(gen_key)
-
-    # ==============================================================================
-# TOP NAVIGATION & HEADER DISPLAY (SINGLE MENU FIX)
-# ==============================================================================
 h_col1, h_col2 = st.columns([4, 1])
 
 with h_col1:
@@ -578,8 +511,6 @@ with h_col2:
             st.rerun()
 
 st.divider()
-
-
 
 # =========================================================
 # PAGE 1: CHAT INTERFACE & PROBLEM SOLVER
