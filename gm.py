@@ -194,12 +194,12 @@ def increment_question_count(username):
     today = datetime.now().strftime("%Y-%m-%d")
     current = get_today_question_count(username)
     with get_db_connection() as conn:
-    with conn.cursor() as c:
-        c.execute("""
-            INSERT INTO usage_tracker (username, usage_date, count)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (username, usage_date)
-            DO UPDATE SET count = EXCLUDED.count
+        with conn.cursor() as c:
+            c.execute("""
+                INSERT INTO usage_tracker (username, usage_date, count)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (username, usage_date)
+                DO UPDATE SET count = EXCLUDED.count
         """, (username, today, current + 1))
     conn.commit()
 
