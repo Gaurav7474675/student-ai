@@ -50,6 +50,11 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# =========================================================
+# 2. CONFIG & SECRETS
+# =========================================================
+
+# Clean & Safe Secrets Loader Function
 def get_env_or_secret(key, default=""):
     try:
         val = st.secrets.get(key)
@@ -59,12 +64,13 @@ def get_env_or_secret(key, default=""):
         pass
     return os.environ.get(key, default)
 
-# Yahan koi bhi visible passcode default mein mat rakho
+# Load Secrets Safely
 PRO_PASSCODE = get_env_or_secret("PRO_PASSCODE", "")
+APP_PASSWORD = get_env_or_secret("APP_PASSWORD", "")
 RAZORPAY_KEY_ID = get_env_or_secret("RAZORPAY_KEY_ID", "")
 RAZORPAY_KEY_SECRET = get_env_or_secret("RAZORPAY_KEY_SECRET", "")
 DB_URL = get_env_or_secret("DATABASE_URL", "")
-
+GEMINI_API_KEY = get_env_or_secret("GEMINI_API_KEY", "")
 # =========================================================
 # 3. DATABASE & USAGE TRACKING (POSTGRESQL / SUPABASE)
 # =========================================================
