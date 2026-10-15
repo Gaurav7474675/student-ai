@@ -8,7 +8,6 @@ import os
 import base64
 import io
 import psycopg2
-import psycopg2.extras
 import hashlib
 import hmac
 import secrets
@@ -54,47 +53,52 @@ st.markdown("""
 # =========================================================
 # 2. CONFIG & SECRETS
 # =========================================================
-PRO_PASSCODE = os.environ.get("PRO_PASSCODE")
-RAZORPAY_KEY_ID = os.environ.get("RAZORPAY_KEY_ID", "")
-RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "")
+PRO_PASSCODE = st.secrets.get("PRO_PASSCODE") or os.environ.get("PRO_PASSCODE") or "GMCYBER2026"
 
+RAZORPAY_KEY_ID = st.secrets.get("RAZORPAY_KEY_ID") or os.environ.get("RAZORPAY_KEY_ID", "")
+RAZORPAY_KEY_SECRET = st.secrets.get("RAZORPAY_KEY_SECRET") or os.environ.get("RAZORPAY_KEY_SECRET", "")
 PRO_PRICE_PAISE = 7900  # ₹79
 
 TELEGRAM_LINK = "https://t.me/pintu9389"
 PAYMENT_QR_URL = "https://raw.githubusercontent.com/Gaurav7474675/student-ai/main/payment_qr.png"
 PROFILE_IMG_URL = "https://raw.githubusercontent.com/Gaurav7474675/student-ai/main/profile.jpeg"
 
+DB_URL = st.secrets.get("DATABASE_URL") or os.environ.get("DATABASE_URL", "")
 MAX_FREE_QUESTIONS = 5
 
 # =========================================================
-# 3. DATABASE & USAGE TRACKING WITH SINGLE-USE KEYS
+# 3. DATABASE & USAGE TRACKING (POSTGRESQL / SUPABASE)
 # =========================================================
-DB_URL = os.environ.get("DATABASE_URL")
-
 def get_db_connection():
+    if not DB_URL:
+        st.error("DATABASE_URL environment secret is missing!")
+        st.stop()
     return psycopg2.connect(DB_URL)
 
 def hash_password(password):
     return hashlib.sha256(password.encode('utf-8')).hexdigest()
 
 def init_db():
-    with get_db_connection() as conn:
-        with conn.cursor() as c:
-            c.execute('''CREATE TABLE IF NOT EXISTS users (
-                username TEXT PRIMARY KEY, password TEXT, email TEXT,
-                is_pro INTEGER DEFAULT 0, pro_expiry TEXT, passcode TEXT)''')
-            c.execute('''CREATE TABLE IF NOT EXISTS transactions (
-                txn_id TEXT PRIMARY KEY, username TEXT, status TEXT, timestamp TEXT)''')
-            c.execute('''CREATE TABLE IF NOT EXISTS payments (
-                order_id TEXT PRIMARY KEY, username TEXT, payment_id TEXT,
-                signature TEXT, status TEXT, timestamp TEXT)''')
-            c.execute('''CREATE TABLE IF NOT EXISTS usage_tracker (
-                username TEXT, usage_date TEXT, count INTEGER DEFAULT 0,
-                PRIMARY KEY (username, usage_date))''')
-            c.execute('''CREATE TABLE IF NOT EXISTS pro_keys (
-                key_code TEXT PRIMARY KEY, is_used INTEGER DEFAULT 0, 
-                used_by TEXT, created_at TEXT)''')
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as c:
+                c.execute('''CREATE TABLE IF NOT EXISTS users (
+                    username TEXT PRIMARY KEY, password TEXT, email TEXT,
+                    is_pro INTEGER DEFAULT 0, pro_expiry TEXT, passcode TEXT)''')
+                c.execute('''CREATE TABLE IF NOT EXISTS transactions (
+                    txn_id TEXT PRIMARY KEY, username TEXT, status TEXT, timestamp TEXT)''')
+                c.execute('''CREATE TABLE IF NOT EXISTS payments (
+                    order_id TEXT PRIMARY KEY, username TEXT, payment_id TEXT,
+                    signature TEXT, status TEXT, timestamp TEXT)''')
+                c.execute('''CREATE TABLE IF NOT EXISTS usage_tracker (
+                    username TEXT, usage_date TEXT, count INTEGER DEFAULT 0,
+                    PRIMARY KEY (username, usage_date))''')
+                c.execute('''CREATE TABLE IF NOT EXISTS pro_keys (
+                    key_code TEXT PRIMARY KEY, is_used INTEGER DEFAULT 0, 
+                    used_by TEXT, created_at TEXT)''')
             conn.commit()
+    except Exception as e:
+        st.error(f"Database Initialization Error: {e}")
 
 init_db()
 
@@ -103,8 +107,9 @@ def generate_unique_pro_key():
     new_key = f"PRO-{secrets.token_hex(4).upper()}"
     created_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with get_db_connection() as conn:
-        conn.execute("INSERT INTO pro_keys (key_code, is_used, created_at) VALUES (%s, 0, %s)",
-                     (new_key, created_time))
+        with conn.cursor() as c:
+            c.execute("INSERT INTO pro_keys (key_code, is_used, created_at) VALUES (%s, 0, %s)",
+                         (new_key, created_time))
         conn.commit()
     return new_key
 
@@ -112,22 +117,22 @@ def redeem_pro_key(user_code, username):
     """Redeems passcode and enforces single-use policy"""
     code_clean = user_code.strip().upper()
     
-    if PRO_PASSCODE and code_clean == PRO_PASSCODE:
+    if code_clean == PRO_PASSCODE:
         expiry_date, _ = update_pro_status(username, code_clean)
         return True, f"🎉 Master Admin Key Accepted! PRO Active till {expiry_date}"
 
     with get_db_connection() as conn:
-        c = conn.cursor()
-        c.execute("SELECT is_used, used_by FROM pro_keys WHERE key_code=%s", (code_clean,))
-        row = c.fetchone()
-        
-        if not row:
-            return False, "❌ Invalid Passcode! Key match nahi hui."
-        
-        if row[0] == 1:
-            return False, f"❌ Ye Key Pehle Hi Kisi User (@{row[1]}) Dwara Use Ho Chuki Hai!"
+        with conn.cursor() as c:
+            c.execute("SELECT is_used, used_by FROM pro_keys WHERE key_code=%s", (code_clean,))
+            row = c.fetchone()
+            
+            if not row:
+                return False, "❌ Invalid Passcode! Key match nahi hui."
+            
+            if row[0] == 1:
+                return False, f"❌ Ye Key Pehle Hi Kisi User (@{row[1]}) Dwara Use Ho Chuki Hai!"
 
-        conn.execute("UPDATE pro_keys SET is_used=1, used_by=%s WHERE key_code=%s", (username, code_clean))
+            c.execute("UPDATE pro_keys SET is_used=1, used_by=%s WHERE key_code=%s", (username, code_clean))
         conn.commit()
         
     expiry_date, _ = update_pro_status(username, code_clean)
@@ -136,12 +141,12 @@ def redeem_pro_key(user_code, username):
 def register_user(username, password, email):
     try:
         with get_db_connection() as conn:
-            c = conn.cursor()
-            c.execute("INSERT INTO users (username, password, email, is_pro) VALUES (%s, %s, %s, 0)",
-                      (username, hash_password(password), email))
+            with conn.cursor() as c:
+                c.execute("INSERT INTO users (username, password, email, is_pro) VALUES (%s, %s, %s, 0)",
+                          (username, hash_password(password), email))
             conn.commit()
         return True, "Account Created! Please Login."
-    except psycopg2.errors.UniqueViolation:
+    except psycopg2.IntegrityError:
         return False, "Username Already Exists!"
     except Exception as e:
         return False, f"Registration Error: {str(e)}"
@@ -149,46 +154,47 @@ def register_user(username, password, email):
 def validate_login(username, password):
     try:
         with get_db_connection() as conn:
-            c = conn.cursor()
-            c.execute("SELECT username, email FROM users WHERE username=%s AND password=%s",
-                      (username, hash_password(password)))
-            return c.fetchone()
+            with conn.cursor() as c:
+                c.execute("SELECT username, email FROM users WHERE username=%s AND password=%s",
+                          (username, hash_password(password)))
+                return c.fetchone()
     except Exception:
         return None
 
 def update_pro_status(username, key_used="SYSTEM_AUTO", days=30):
     expiry_date = (datetime.now() + timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
     with get_db_connection() as conn:
-        conn.execute("UPDATE users SET is_pro=1, pro_expiry=%s, passcode=%s WHERE username=%s",
-                     (expiry_date, key_used, username))
+        with conn.cursor() as c:
+            c.execute("UPDATE users SET is_pro=1, pro_expiry=%s, passcode=%s WHERE username=%s",
+                         (expiry_date, key_used, username))
         conn.commit()
     return expiry_date, key_used
 
 def check_user_pro_validity(username):
     try:
         with get_db_connection() as conn:
-            c = conn.cursor()
-            c.execute("SELECT is_pro, pro_expiry, passcode FROM users WHERE username=%s", (username,))
-            row = c.fetchone()
-            if not row or row[0] == 0 or not row[1]:
-                return False, "Free Tier", 0, None
-            expiry_dt = datetime.strptime(row[1], "%Y-%m-%d %H:%M:%S")
-            if datetime.now() > expiry_dt:
-                conn.execute("UPDATE users SET is_pro=0 WHERE username=%s", (username,))
-                conn.commit()
-                return False, "Expired", 0, None
-            days_left = (expiry_dt - datetime.now()).days
-            return True, row[1], max(0, days_left), row[2]
+            with conn.cursor() as c:
+                c.execute("SELECT is_pro, pro_expiry, passcode FROM users WHERE username=%s", (username,))
+                row = c.fetchone()
+                if not row or row[0] == 0 or not row[1]:
+                    return False, "Free Tier", 0, None
+                expiry_dt = datetime.strptime(row[1], "%Y-%m-%d %H:%M:%S")
+                if datetime.now() > expiry_dt:
+                    c.execute("UPDATE users SET is_pro=0 WHERE username=%s", (username,))
+                    conn.commit()
+                    return False, "Expired", 0, None
+                days_left = (expiry_dt - datetime.now()).days
+                return True, row[1], max(0, days_left), row[2]
     except Exception:
         return False, "Free Tier", 0, None
 
 def get_today_question_count(username):
     today = datetime.now().strftime("%Y-%m-%d")
     with get_db_connection() as conn:
-        c = conn.cursor()
-        c.execute("SELECT count FROM usage_tracker WHERE username=%s AND usage_date=%s", (username, today))
-        row = c.fetchone()
-        return row[0] if row else 0
+        with conn.cursor() as c:
+            c.execute("SELECT count FROM usage_tracker WHERE username=%s AND usage_date=%s", (username, today))
+            row = c.fetchone()
+            return row[0] if row else 0
 
 def increment_question_count(username):
     today = datetime.now().strftime("%Y-%m-%d")
@@ -196,12 +202,12 @@ def increment_question_count(username):
     with get_db_connection() as conn:
         with conn.cursor() as c:
             c.execute("""
-                INSERT INTO usage_tracker (username, usage_date, count)
+                INSERT INTO usage_tracker (username, usage_date, count) 
                 VALUES (%s, %s, %s)
-                ON CONFLICT (username, usage_date)
+                ON CONFLICT (username, usage_date) 
                 DO UPDATE SET count = EXCLUDED.count
-        """, (username, today, current + 1))
-    conn.commit()
+            """, (username, today, current + 1))
+        conn.commit()
 
 # =========================================================
 # 4. RAZORPAY PAYMENT SYSTEM
@@ -217,8 +223,12 @@ def create_razorpay_order(username):
         if resp.status_code == 200:
             order = resp.json()
             with get_db_connection() as conn:
-                conn.execute("INSERT OR REPLACE INTO payments (order_id, username, status, timestamp) VALUES (%s, %s, 'CREATED', %s)",
-                             (order["id"], username, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+                with conn.cursor() as c:
+                    c.execute("""
+                        INSERT INTO payments (order_id, username, status, timestamp) 
+                        VALUES (%s, %s, 'CREATED', %s)
+                        ON CONFLICT (order_id) DO NOTHING
+                    """, (order["id"], username, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
                 conn.commit()
             return order
         return None
@@ -238,30 +248,30 @@ def process_verified_payment(order_id, payment_id, signature, username):
     if not verify_razorpay_signature(order_id, payment_id, signature):
         return False, "❌ Payment signature verification FAILED!", None
     with get_db_connection() as conn:
-        c = conn.cursor()
-        c.execute("SELECT status FROM payments WHERE order_id=%s", (order_id,))
-        row = c.fetchone()
-        if row and row[0] == "PAID":
-            return False, "⚠️ Ye payment pehle se verify ho chuka hai!", None
-        
-        try:
-            pr = requests.get(f"https://api.razorpay.com/v1/payments/{payment_id}",
-                              auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET), timeout=30)
-            if pr.status_code == 200:
-                pdata = pr.json()
-                if pdata.get("status") != "captured" or pdata.get("order_id") != order_id:
-                    return False, "❌ Payment capture nahi hua!", None
-            else:
-                return False, "❌ Razorpay verification failed.", None
-        except Exception as e:
-            return False, f"❌ Error: {str(e)}", None
+        with conn.cursor() as c:
+            c.execute("SELECT status FROM payments WHERE order_id=%s", (order_id,))
+            row = c.fetchone()
+            if row and row[0] == "PAID":
+                return False, "⚠️ Ye payment pehle se verify ho chuka hai!", None
+            
+            try:
+                pr = requests.get(f"https://api.razorpay.com/v1/payments/{payment_id}",
+                                  auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET), timeout=30)
+                if pr.status_code == 200:
+                    pdata = pr.json()
+                    if pdata.get("status") != "captured" or pdata.get("order_id") != order_id:
+                        return False, "❌ Payment capture nahi hua!", None
+                else:
+                    return False, "❌ Razorpay verification failed.", None
+            except Exception as e:
+                return False, f"❌ Error: {str(e)}", None
 
-        auto_key = f"PRO-RZP-{secrets.token_hex(4).upper()}"
-        created_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        conn.execute("INSERT INTO pro_keys (key_code, is_used, used_by, created_at) VALUES (%s, 1, %s, %s)",
-                     (auto_key, username, created_time))
-        conn.execute("UPDATE payments SET payment_id=%s, signature=%s, status='PAID' WHERE order_id=%s",
-                     (payment_id, signature, order_id))
+            auto_key = f"PRO-RZP-{secrets.token_hex(4).upper()}"
+            created_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            c.execute("INSERT INTO pro_keys (key_code, is_used, used_by, created_at) VALUES (%s, 1, %s, %s)",
+                         (auto_key, username, created_time))
+            c.execute("UPDATE payments SET payment_id=%s, signature=%s, status='PAID' WHERE order_id=%s",
+                         (payment_id, signature, order_id))
         conn.commit()
         
     expiry, pass_key = update_pro_status(username, auto_key, days=30)
@@ -332,7 +342,7 @@ if rzp_payment and rzp_order and rzp_sig:
 # 6. GEMINI AI CLIENT
 # =========================================================
 def get_gemini_client():
-    gemini_key = os.environ.get("GEMINI_API_KEY", "")
+    gemini_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY", "")
     if not gemini_key:
         return None
     gemini_key = str(gemini_key).strip().replace('"', '').replace("'", "")
@@ -341,7 +351,8 @@ def get_gemini_client():
 def call_ai(prompt, image=None):
     client = get_gemini_client()
     if client is None:
-        return "⚠️ Gemini API key missing hai. Render Environment Variables check karein."
+        return "⚠️ Gemini API key missing hai. Streamlit Secrets check karein."
+
     contents = []
     if image:
         contents.append(image)
@@ -360,12 +371,17 @@ def call_ai(prompt, image=None):
         except Exception as e:
             error_text = str(e)
             if "429" in error_text or "RESOURCE_EXHAUSTED" in error_text:
-                return "⚠️ **Gemini AI quota temporarily exhausted.** Please try again later."
+                return (
+                    "⚠️ **Student AI quota temporarily exhausted.**\n\n"
+                    "Google Gemini ki current API quota limit reach ho gayi hai. "
+                    "Ye Student AI ke 5-question limit ka issue nahi hai.\n\n"
+                    "Please try again after the Gemini quota resets."
+                )
             if ("503" in error_text or "UNAVAILABLE" in error_text) and attempt < max_retries - 1:
                 time.sleep(2 * (attempt + 1))
                 continue
             return f"⚠️ Gemini service error: {error_text}"
-    return "⚠️ AI service temporarily unavailable."
+    return "⚠️ AI service temporarily unavailable. Please try again."
 
 # =========================================================
 # 7. AUTH SCREEN (LOGIN & REGISTER)
@@ -409,7 +425,7 @@ if not st.session_state.get("is_logged_in", False):
     st.stop()
 
 # =========================================================
-# 8. MAIN APP DASHBOARD
+# 8. MAIN APP DASHBOARD & PAGES
 # =========================================================
 username = st.session_state.user_data["username"]
 is_pro, expiry_info, days_left, passcode_key = check_user_pro_validity(username)
@@ -439,222 +455,147 @@ with st.sidebar:
             if passcode_key:
                 st.code(f"Passcode: {passcode_key}")
         else:
-            st.write("🔥 **Unlock Unlimited Questions & Photo Solver!**")
-            st.image(PAYMENT_QR_URL, caption="Scan QR to Pay ₹79", use_container_width=True)
-            st.link_button("📲 Send Screenshot on Telegram", TELEGRAM_LINK, use_container_width=True)
-
-            if RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET:
-                st.divider()
-                if st.button("💳 Pay ₹79 Securely (Auto-Verify)", type="primary", use_container_width=True):
-                    order = create_razorpay_order(username)
-                    if order:
-                        st.session_state.rzp_order = order
-                    else:
-                        st.error("Order creation failed.")
-                if st.session_state.get("rzp_order"):
-                    render_razorpay_checkout(st.session_state.rzp_order, username, get_app_url())
+            st.markdown("### 👑 Go Pro - ₹79 Only")
+            st.write("Unlock unlimited questions & priority speed for 30 days!")
             
-            st.divider()
-            admin_code = st.text_input("Enter Passcode Key:", key="side_admin_key")
-            if st.button("Activate via Passcode", use_container_width=True):
-                if admin_code.strip():
-                    ok, msg = redeem_pro_key(admin_code, username)
-                    if ok:
-                        st.success(msg)
-                        st.rerun()
-                    else:
-                        st.error(msg)
+            if st.button("🚀 Pay ₹79 via Razorpay", use_container_width=True):
+                order = create_razorpay_order(username)
+                if order:
+                    render_razorpay_checkout(order, username, get_app_url())
                 else:
-                    st.error("Passcode enter karein!")
+                    st.error("Razorpay order create nahi ho paya. Keys check karein.")
 
-    if st.button("🚪 Logout Account", use_container_width=True):
+            st.markdown("---")
+            st.markdown("**Or Pay via UPI / QR:**")
+            st.image(PAYMENT_QR_URL, use_container_width=True)
+            st.markdown(f"[💬 Send Payment Screenshot on Telegram]({TELEGRAM_LINK})")
+
+            st.markdown("---")
+            entered_key = st.text_input("🔑 Enter Pro Passcode", type="password")
+            if st.button("Verify Passcode", use_container_width=True):
+                ok, msg = redeem_pro_key(entered_key, username)
+                (st.success if ok else st.error)(msg)
+                if ok:
+                    st.rerun()
+
+    if username in ["admin", "Gaurav", "Gg"] or is_pro:
+        with st.expander("⚙️ Admin Tools (Key Gen)"):
+            if st.button("Generate New PRO Key"):
+                k = generate_unique_pro_key()
+                st.success(f"New Key Generated: `{k}`")
+
+    st.divider()
+    if st.button("🚪 Log Out", use_container_width=True):
         st.session_state.is_logged_in = False
-        st.session_state.user_data = None
+        st.session_state.messages = []
         st.rerun()
 
-if st.session_state.get("rzp_result"):
-    ok, msg, pk = st.session_state.rzp_result
-    (st.success if ok else st.error)(msg)
-    if ok and pk:
-        st.code(f"Your Passcode Key: {pk}")
-    st.session_state.rzp_result = None
-
-h_col1, h_col2 = st.columns([4, 1])
-
-with h_col1:
-    if is_pro:
-        st.markdown(f'''
-            <div style="display: flex; align-items: center; justify-content: center; gap: 6px;">
-                <span style="font-size: 20px; font-weight: 700;">🛡️ Student AI Pro</span>
-                <span class="pro-badge">PRO</span>
-            </div>
-            <div style="text-align: center; font-size: 12px; color: #00FF66; margin-top: 2px;">
-                ⏳ <b>{days_left} Days Left</b>
-            </div>
-        ''', unsafe_allow_html=True)
-    else:
-        st.markdown('''
-            <div style="display: flex; align-items: center; justify-content: center;">
-                <span style="font-size: 20px; font-weight: 700;">🛡️ Student AI</span>
-            </div>
-            <div style="text-align: center; font-size: 12px; color: #888888; margin-top: 2px;">
-                🆓 Free Tier
-            </div>
-        ''', unsafe_allow_html=True)
-
-with h_col2:
-    with st.popover("⋮ More"):
-        st.caption(f"User: @{username}")
-        st.caption(f"Status: {'👑 PRO Active' if is_pro else '🆓 Free Plan'}")
-        st.divider()
-        if st.button("👨‍💻 Developer Profile", key="pop_more_dev_btn", use_container_width=True):
-            st.session_state.active_page = "developer"
-            st.rerun()
-
-st.divider()
-
 # =========================================================
-# PAGE 1: CHAT INTERFACE & PROBLEM SOLVER
+# PAGE 1: CHAT AI INTERFACE
 # =========================================================
 if st.session_state.active_page == "chat":
-    if not st.session_state.messages:
-        st.markdown(f"<h3 style='text-align: center; margin-top: 20px;'>Hi {username}! 👋</h3>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #8E8E93;'>Apne Doubts, PDF Notes, ya Exam Questions upload karke solution paayein!</p>", unsafe_allow_html=True)
+    st.markdown(f"""
+        <div class="top-bar-custom">
+            <div class="app-title-text">Hi {username}! 👋</div>
+            <div>
+                <span style="font-size:12px; color:#888;">Plan Mode:</span>
+                <span class="pro-badge">{'PRO' if is_pro else 'Free Tier'}</span>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
 
+    st.caption("Apne Doubts, PDF Notes, ya Exam Questions upload karke solution paayein!")
+
+    uploaded_file = st.file_uploader("📎 Attach PDF Notes / Photo Problem", type=["png", "jpg", "jpeg", "pdf"])
+
+    # Render previous messages
     for msg in st.session_state.messages:
         if msg["role"] == "user":
             st.markdown(f'<div class="chat-user">{msg["content"]}</div>', unsafe_allow_html=True)
         else:
             st.markdown(f'<div class="chat-ai">{msg["content"]}</div>', unsafe_allow_html=True)
-    st.markdown("<div style='clear: both;'></div>", unsafe_allow_html=True)
 
-    with st.popover("📎 Attach PDF Notes / Photo Problem"):
-        st.markdown("### Attach Document / Image")
-        attach_type = st.radio("Choose Mode:", ["PDF Exam Solver", "Photo Problem Solver"])
+    user_query = st.chat_input("Kuch bhi puchein...")
 
-        if attach_type == "PDF Exam Solver":
-            uploaded_pdf = st.file_uploader("Upload PDF Notes:", type=["pdf"])
-            pdf_feature = st.selectbox("Output Format:", ["⚡ Quick Revision Notes", "🎯 Important Exam Questions", "🧪 Practice Quiz (MCQs)"])
-            if uploaded_pdf and st.button("🚀 Process PDF", type="primary", use_container_width=True):
+    if user_query:
+        if not is_pro and used_questions >= MAX_FREE_QUESTIONS:
+            st.error("🚨 Aaj ka aapka 5 free questions ka limit khatm ho gaya hai! Unlimited access ke liye sidebar se PRO upgrade karein.")
+            st.stop()
+
+        st.session_state.messages.append({"role": "user", "content": user_query})
+        st.markdown(f'<div class="chat-user">{user_query}</div>', unsafe_allow_html=True)
+
+        extracted_text = ""
+        pil_img = None
+
+        if uploaded_file:
+            if uploaded_file.type == "application/pdf":
                 try:
-                    reader = PdfReader(io.BytesIO(uploaded_pdf.getvalue()))
-                    page_count = len(reader.pages)
-                    if page_count > 3 and not is_pro:
-                        st.error("🔒 Free version mein maximum 3 pages allowed hain! Pro lein unlimited pages ke liye.")
-                    else:
-                        max_pages = page_count if is_pro else min(page_count, 3)
-                        extracted_text = "".join([p.extract_text() or "" for p in reader.pages[:max_pages]])
-                        prompt_text = f"Analyze document and generate '{pdf_feature}':\n\n{extracted_text[:80000]}"
-                        st.session_state.messages.append({"role": "user", "content": f"📂 Analyzed PDF: {uploaded_pdf.name}"})
-                        with st.spinner("Processing PDF..."):
-                            res = call_ai(prompt_text)
-                            st.session_state.messages.append({"role": "assistant", "content": res})
-                        st.rerun()
-                except Exception as pdf_err:
-                    st.error(f"Error parsing PDF: {str(pdf_err)}")
-
-        elif attach_type == "Photo Problem Solver":
-            if not is_pro:
-                st.error("🔒 Photo Solver feature strictly Pro version me available hai!")
+                    pdf_reader = PdfReader(uploaded_file)
+                    for page in pdf_reader.pages:
+                        t = page.extract_text()
+                        if t:
+                            extracted_text += t + "\n"
+                except Exception:
+                    pass
             else:
-                uploaded_img = st.file_uploader("Upload Image:", type=["jpg", "png", "jpeg"])
-                if uploaded_img and st.button("⚡ Solve Photo Question", type="primary", use_container_width=True):
-                    try:
-                        img = Image.open(uploaded_img)
-                        st.session_state.messages.append({"role": "user", "content": "📷 Photo Question Uploaded"})
-                        with st.spinner("Solving Question..."):
-                            res = call_ai("Solve this question with step-by-step detail:", image=img)
-                            st.session_state.messages.append({"role": "assistant", "content": res})
-                        st.rerun()
-                    except Exception as img_err:
-                        st.error(f"Error processing image: {str(img_err)}")
+                try:
+                    pil_img = Image.open(uploaded_file)
+                except Exception:
+                    pass
 
-    if not is_pro and used_questions >= MAX_FREE_QUESTIONS:
-        st.error("🚨 **Daily Limit Reached!** Aapne aaj ke 5 Free Questions complete kar liye hain.")
-        st.markdown("""
-        <div style="background-color: #1E1010; border: 2px solid #FF4D4D; border-radius: 12px; padding: 20px; text-align: center; margin-top: 10px; margin-bottom: 25px;">
-            <h2 style="color: #FF4D4D; margin-top: 0;">🔒 Upgrade to Pro to Continue</h2>
-            <p style="color: #CCCCCC; font-size: 15px;">Aaj ki daily limit (5 Questions) poori ho chuki hai. Unlimited questions ke liye Pro Upgrade karein!</p>
-            <h3 style="color: #FFD700;">Kewal ₹79 / Month</h3>
-        </div>
-        """, unsafe_allow_html=True)
-        st.link_button("📲 Get Pro Passcode via Telegram", TELEGRAM_LINK, use_container_width=True)
-    else:
-        user_prompt = st.chat_input("Kuch bhi puchein...")
-        status_text = "Plan Mode: Pro (Unlimited Access)" if is_pro else f"Plan Mode: Free Tier ({remaining_questions} Questions Left Today)"
-        st.markdown(f"<div class='plan-notice'>{status_text}</div>", unsafe_allow_html=True)
+        full_prompt = user_query
+        if extracted_text:
+            full_prompt = f"Context from uploaded PDF:\n{extracted_text[:4000]}\n\nQuestion: {user_query}"
 
-        if user_prompt:
-            st.session_state.messages.append({"role": "user", "content": user_prompt})
-            if not is_pro:
-                increment_question_count(username)
-            with st.spinner("Thinking..."):
-                res = call_ai(user_prompt)
-                st.session_state.messages.append({"role": "assistant", "content": res})
-            st.rerun()
+        with st.spinner("🧠 AI Thinking..."):
+            ai_reply = call_ai(full_prompt, image=pil_img)
+
+        if not is_pro:
+            increment_question_count(username)
+
+        st.session_state.messages.append({"role": "assistant", "content": ai_reply})
+        st.markdown(f'<div class="chat-ai">{ai_reply}</div>', unsafe_allow_html=True)
+        st.rerun()
 
 # =========================================================
 # PAGE 2: ABOUT APP & PLANS
 # =========================================================
 elif st.session_state.active_page == "about":
-    st.markdown(f"## 📱 About {app_display_name} & Membership Plans")
-    st.write("Student AI platform specially built for students to solve exam questions and analyze PDF study materials instantly.")
-    st.divider()
-
-    col_f1, col_f2 = st.columns(2)
-    with col_f1:
+    st.markdown("## 📱 About Student AI & Plans")
+    st.write("Student AI ek advanced educational assistant hai jo students ko unke homework, study notes, aur exam preparations mein madad karta hai.")
+    
+    col1, col2 = st.columns(2)
+    with col1:
         st.markdown("""
-        <div class="feature-card">
-            <h3>🆓 Free Version</h3>
-            <ul>
-                <li>Daily Limit: <b>5 Direct Questions/Day</b>.</li>
-                <li>PDF Page Limit: <b>3 Pages</b>.</li>
-                <li>Standard Speed.</li>
-            </ul>
-        </div>
+            <div class="feature-card">
+                <h3>🆓 Free Plan</h3>
+                <p>• 5 Questions daily free limit</p>
+                <p>• AI Chat & Image problem solver</p>
+                <p>• Basic PDF text extraction</p>
+            </div>
         """, unsafe_allow_html=True)
-    with col_f2:
+    with col2:
         st.markdown("""
-        <div class="feature-card" style="border: 1px solid #38BDF8;">
-            <h3 style="color: #38BDF8;">👑 Pro Version</h3>
-            <ul>
-                <li><b>Unlimited Questions</b>.</li>
-                <li><b>Unlimited PDF Scanning</b>.</li>
-                <li><b>Photo Question Solver</b>.</li>
-                <li><b>Single-Use Key Protection</b>.</li>
-            </ul>
-        </div>
+            <div class="feature-card">
+                <h3>👑 PRO Plan (₹79 / Month)</h3>
+                <p>• <b>Unlimited Questions</b> (No daily cap)</p>
+                <p>• Priority AI model speed</p>
+                <p>• Advanced PDF & Image analysis</p>
+                <p>• 30 Days full validity</p>
+            </div>
         """, unsafe_allow_html=True)
-    st.divider()
-
-    if not is_pro:
-        st.subheader("💳 Activate Pro Membership")
-        st.image(PAYMENT_QR_URL, caption="Scan QR & Pay ₹79", width=220)
-        st.link_button("📲 Send Screenshot on Telegram", TELEGRAM_LINK, use_container_width=True)
-        st.divider()
-        about_admin_code = st.text_input("Enter Passcode Key:", key="about_admin_key")
-        if st.button("⚡ Activate Pro Membership", use_container_width=True):
-            if about_admin_code.strip():
-                ok, msg = redeem_pro_key(about_admin_code, username)
-                if ok:
-                    st.success(msg)
-                    st.rerun()
-                else:
-                    st.error(msg)
-            else:
-                st.error("Passcode enter karein!")
 
 # =========================================================
 # PAGE 3: DEVELOPER PROFILE
 # =========================================================
 elif st.session_state.active_page == "developer":
-    st.markdown("## 👨‍💻 Developer Profile")
-    st.divider()
-    st.markdown(f"""
-    <div style="text-align: center; padding: 20px; background-color: #121212; border-radius: 12px; border: 1px solid #222;">
-        <img src="{PROFILE_IMG_URL}" style="width: 110px; height: 110px; border-radius: 50%; object-fit: cover; border: 2px solid #38BDF8; margin-bottom: 10px;">
-        <h3 style="margin-bottom: 0px;">Cyber Gaurav</h3>
-        <p style="color: #38BDF8; font-size: 14px; margin-top: 4px;">Lead Developer & AI Creator</p>
-    </div>
-    """, unsafe_allow_html=True)
-    st.link_button("📲 Join Official Telegram Channel", TELEGRAM_LINK, use_container_width=True)
+    col_d1, col_d2 = st.columns([1, 2])
+    with col_d1:
+        st.image(PROFILE_IMG_URL, use_container_width=True)
+    with col_d2:
+        st.markdown("## 👨‍💻 Developer Profile")
+        st.write("**Name:** Gaurav")
+        st.write("**Expertise:** Full-Stack Developer & AI Systems")
+        st.write("Student AI ko students ke liye study ko aasan banane ke liye banaya gaya hai.")
+        st.markdown(f"[💬 Contact on Telegram]({TELEGRAM_LINK})")
