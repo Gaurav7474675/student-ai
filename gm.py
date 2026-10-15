@@ -50,21 +50,20 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# =========================================================
-# 2. CONFIG & SECRETS
-# =========================================================
-PRO_PASSCODE = st.secrets.get("PRO_PASSCODE") or os.environ.get("PRO_PASSCODE") or "GMCYBER2026"
+def get_env_or_secret(key, default=""):
+    try:
+        val = st.secrets.get(key)
+        if val:
+            return val
+    except Exception:
+        pass
+    return os.environ.get(key, default)
 
-RAZORPAY_KEY_ID = st.secrets.get("RAZORPAY_KEY_ID") or os.environ.get("RAZORPAY_KEY_ID", "")
-RAZORPAY_KEY_SECRET = st.secrets.get("RAZORPAY_KEY_SECRET") or os.environ.get("RAZORPAY_KEY_SECRET", "")
-PRO_PRICE_PAISE = 7900  # ₹79
-
-TELEGRAM_LINK = "https://t.me/pintu9389"
-PAYMENT_QR_URL = "https://raw.githubusercontent.com/Gaurav7474675/student-ai/main/payment_qr.png"
-PROFILE_IMG_URL = "https://raw.githubusercontent.com/Gaurav7474675/student-ai/main/profile.jpeg"
-
-DB_URL = st.secrets.get("DATABASE_URL") or os.environ.get("DATABASE_URL", "")
-MAX_FREE_QUESTIONS = 5
+# Yahan koi bhi visible passcode default mein mat rakho
+PRO_PASSCODE = get_env_or_secret("PRO_PASSCODE", "")
+RAZORPAY_KEY_ID = get_env_or_secret("RAZORPAY_KEY_ID", "")
+RAZORPAY_KEY_SECRET = get_env_or_secret("RAZORPAY_KEY_SECRET", "")
+DB_URL = get_env_or_secret("DATABASE_URL", "")
 
 # =========================================================
 # 3. DATABASE & USAGE TRACKING (POSTGRESQL / SUPABASE)
