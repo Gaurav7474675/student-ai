@@ -71,6 +71,7 @@ RAZORPAY_KEY_ID = get_env_or_secret("RAZORPAY_KEY_ID", "")
 RAZORPAY_KEY_SECRET = get_env_or_secret("RAZORPAY_KEY_SECRET", "")
 DB_URL = get_env_or_secret("DATABASE_URL", "")
 GEMINI_API_KEY = get_env_or_secret("GEMINI_API_KEY", "")
+MAX_FREE_QUESTIONS = 5 
 # =========================================================
 # 3. DATABASE & USAGE TRACKING (POSTGRESQL / SUPABASE)
 # =========================================================
