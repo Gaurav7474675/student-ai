@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import secrets
 from datetime import datetime, timedelta
+import time
 
 # =========================================================
 # 1. PAGE CONFIG & STYLES
@@ -52,10 +53,18 @@ st.markdown("""
 # =========================================================
 # 2. CONFIG & SECRETS
 # =========================================================
-PRO_PASSCODE = st.secrets.get("PRO_PASSCODE") or os.environ.get("PRO_PASSCODE") or "GMCYBER2026"
+def get_env_or_secret(key, default=""):
+    try:
+        val = st.secrets.get(key)
+        if val:
+            return val
+    except Exception:
+        pass
+    return os.environ.get(key, default)
 
-RAZORPAY_KEY_ID = st.secrets.get("RAZORPAY_KEY_ID") or os.environ.get("RAZORPAY_KEY_ID", "")
-RAZORPAY_KEY_SECRET = st.secrets.get("RAZORPAY_KEY_SECRET") or os.environ.get("RAZORPAY_KEY_SECRET", "")
+PRO_PASSCODE = get_env_or_secret("PRO_PASSCODE", "GMCYBER2026")
+RAZORPAY_KEY_ID = get_env_or_secret("RAZORPAY_KEY_ID", "")
+RAZORPAY_KEY_SECRET = get_env_or_secret("RAZORPAY_KEY_SECRET", "")
 PRO_PRICE_PAISE = 7900  # ₹79
 
 TELEGRAM_LINK = "https://t.me/pintu9389"
@@ -69,7 +78,9 @@ MAX_FREE_QUESTIONS = 5
 # 3. DATABASE & USAGE TRACKING WITH SINGLE-USE KEYS
 # =========================================================
 def get_db_connection():
-    return sqlite3.connect(DB_FILE, timeout=15)
+    conn = sqlite3.connect(DB_FILE, timeout=30)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 def hash_password(password):
     return hashlib.sha256(password.encode('utf-8')).hexdigest()
@@ -96,7 +107,6 @@ def init_db():
 init_db()
 
 def generate_unique_pro_key():
-    """Generates a random unique single-use key and saves to DB"""
     new_key = f"PRO-{secrets.token_hex(4).upper()}"
     created_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with get_db_connection() as conn:
@@ -106,7 +116,6 @@ def generate_unique_pro_key():
     return new_key
 
 def redeem_pro_key(user_code, username):
-    """Redeems passcode and enforces single-use policy"""
     code_clean = user_code.strip().upper()
     
     if code_clean == PRO_PASSCODE:
@@ -121,8 +130,8 @@ def redeem_pro_key(user_code, username):
         if not row:
             return False, "❌ Invalid Passcode! Key match nahi hui."
         
-        if row[0] == 1:
-            return False, f"❌ Ye Key Pehle Hi Kisi User (@{row[1]}) Dwara Use Ho Chuki Hai!"
+        if row['is_used'] == 1:
+            return False, f"❌ Ye Key Pehle Hi Kisi User (@{row['used_by']}) Dwara Use Ho Chuki Hai!"
 
         conn.execute("UPDATE pro_keys SET is_used=1, used_by=? WHERE key_code=?", (username, code_clean))
         conn.commit()
@@ -135,7 +144,7 @@ def register_user(username, password, email):
         with get_db_connection() as conn:
             c = conn.cursor()
             c.execute("INSERT INTO users (username, password, email, is_pro) VALUES (?, ?, ?, 0)",
-                      (username, hash_password(password), email))
+                      (username.strip(), hash_password(password), email.strip()))
             conn.commit()
         return True, "Account Created! Please Login."
     except sqlite3.IntegrityError:
@@ -148,8 +157,11 @@ def validate_login(username, password):
         with get_db_connection() as conn:
             c = conn.cursor()
             c.execute("SELECT username, email FROM users WHERE username=? AND password=?",
-                      (username, hash_password(password)))
-            return c.fetchone()
+                      (username.strip(), hash_password(password)))
+            row = c.fetchone()
+            if row:
+                return dict(row)
+            return None
     except Exception:
         return None
 
@@ -167,15 +179,17 @@ def check_user_pro_validity(username):
             c = conn.cursor()
             c.execute("SELECT is_pro, pro_expiry, passcode FROM users WHERE username=?", (username,))
             row = c.fetchone()
-            if not row or row[0] == 0 or not row[1]:
+            if not row or row['is_pro'] == 0 or not row['pro_expiry']:
                 return False, "Free Tier", 0, None
-            expiry_dt = datetime.strptime(row[1], "%Y-%m-%d %H:%M:%S")
+            
+            expiry_dt = datetime.strptime(row['pro_expiry'], "%Y-%m-%d %H:%M:%S")
             if datetime.now() > expiry_dt:
                 conn.execute("UPDATE users SET is_pro=0 WHERE username=?", (username,))
                 conn.commit()
                 return False, "Expired", 0, None
+                
             days_left = (expiry_dt - datetime.now()).days
-            return True, row[1], max(0, days_left), row[2]
+            return True, row['pro_expiry'], max(0, days_left), row['passcode']
     except Exception:
         return False, "Free Tier", 0, None
 
@@ -185,7 +199,7 @@ def get_today_question_count(username):
         c = conn.cursor()
         c.execute("SELECT count FROM usage_tracker WHERE username=? AND usage_date=?", (username, today))
         row = c.fetchone()
-        return row[0] if row else 0
+        return row['count'] if row else 0
 
 def increment_question_count(username):
     today = datetime.now().strftime("%Y-%m-%d")
@@ -233,7 +247,7 @@ def process_verified_payment(order_id, payment_id, signature, username):
         c = conn.cursor()
         c.execute("SELECT status FROM payments WHERE order_id=?", (order_id,))
         row = c.fetchone()
-        if row and row[0] == "PAID":
+        if row and row['status'] == "PAID":
             return False, "⚠️ Ye payment pehle se verify ho chuka hai!", None
         
         try:
@@ -291,7 +305,7 @@ def render_razorpay_checkout(order, username, app_url):
     components.html(checkout_html, height=150)
 
 # =========================================================
-# 5. SESSION & APP STATE
+# 5. SESSION & APP STATE (WITH PERSISTENCE & AUTO-RESTORE)
 # =========================================================
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -299,6 +313,20 @@ if "active_page" not in st.session_state:
     st.session_state.active_page = "chat"
 if "is_logged_in" not in st.session_state:
     st.session_state.is_logged_in = False
+if "user_data" not in st.session_state:
+    st.session_state.user_data = None
+
+# Query params se login state ko auto-restore karna taaki refresh ya sleep ke baad logout na ho
+if not st.session_state.is_logged_in:
+    saved_user = st.query_params.get("logged_user")
+    if saved_user:
+        with get_db_connection() as conn:
+            c = conn.cursor()
+            c.execute("SELECT username, email FROM users WHERE username=?", (saved_user,))
+            row = c.fetchone()
+            if row:
+                st.session_state.is_logged_in = True
+                st.session_state.user_data = {"username": row['username'], "email": row['email']}
 
 def get_app_url():
     try:
@@ -313,95 +341,55 @@ rzp_payment = st.query_params.get("rzp_payment")
 rzp_order = st.query_params.get("rzp_order")
 rzp_sig = st.query_params.get("rzp_sig")
 if rzp_payment and rzp_order and rzp_sig:
-    st.query_params.clear()
     if st.session_state.get("is_logged_in"):
         ok, msg, pk = process_verified_payment(rzp_order, rzp_payment, rzp_sig,
                                                st.session_state.user_data["username"])
         st.session_state.rzp_result = (ok, msg, pk)
+        st.query_params.clear()
+        st.query_params["logged_user"] = st.session_state.user_data["username"]
         st.rerun()
 
-import os
-import time
-import streamlit as st
-from google import genai
-
-
+# =========================================================
+# 6. GEMINI AI CLIENT
+# =========================================================
 def get_gemini_client():
-    gemini_key = (
-        st.secrets.get("GEMINI_API_KEY")
-        or os.environ.get("GEMINI_API_KEY", "")
-    )
-
+    gemini_key = get_env_or_secret("GEMINI_API_KEY", "")
     if not gemini_key:
         return None
-
     gemini_key = str(gemini_key).strip().replace('"', '').replace("'", "")
-
     return genai.Client(api_key=gemini_key)
 
-
 def call_ai(prompt, image=None):
-
     client = get_gemini_client()
-
     if client is None:
         return "⚠️ Gemini API key missing hai. Streamlit Secrets check karein."
-
     contents = []
-
     if image:
         contents.append(image)
-
     contents.append(str(prompt)[:15000])
 
-    # Sirf temporary server errors ke liye retry
     max_retries = 3
-
     for attempt in range(max_retries):
-
         try:
-
             response = client.models.generate_content(
-                model="gemini-3.8-flash",
+                model="gemini-2.5-flash",
                 contents=contents
             )
-
             if response and response.text:
                 return response.text
-
             return "⚠️ AI ne koi response nahi diya."
-
         except Exception as e:
-
             error_text = str(e)
-
-            # --------------------------------
-            # 429 = QUOTA EXHAUSTED
-            # --------------------------------
             if "429" in error_text or "RESOURCE_EXHAUSTED" in error_text:
-
                 return (
-                    "⚠️ **Student AI AI quota temporarily exhausted.**\n\n"
+                    "⚠️ **Student AI quota temporarily exhausted.**\n\n"
                     "Google Gemini ki current API quota limit reach ho gayi hai. "
-                    "Ye Student AI ke 5-question limit ka issue nahi hai.\n\n"
                     "Please try again after the Gemini quota resets."
                 )
-
-            # --------------------------------
-            # 503 = TEMPORARY SERVER ERROR
-            # --------------------------------
-            if (
-                ("503" in error_text or "UNAVAILABLE" in error_text)
-                and attempt < max_retries - 1
-            ):
+            if ("503" in error_text or "UNAVAILABLE" in error_text) and attempt < max_retries - 1:
                 time.sleep(2 * (attempt + 1))
                 continue
-
-            # --------------------------------
-            # OTHER ERROR
-            # --------------------------------
             return f"⚠️ Gemini service error: {error_text}"
-
     return "⚠️ AI service temporarily unavailable. Please try again."
 
 # =========================================================
@@ -422,10 +410,11 @@ if not st.session_state.get("is_logged_in", False):
                 login_pass = st.text_input("🔑 Password", type="password")
                 submit_login = st.form_submit_button("Log In", type="primary", use_container_width=True)
             if submit_login:
-                user = validate_login(login_user.strip(), login_pass.strip())
+                user = validate_login(login_user, login_pass)
                 if user:
                     st.session_state.is_logged_in = True
-                    st.session_state.user_data = {"username": user[0], "email": user[1]}
+                    st.session_state.user_data = {"username": user['username'], "email": user['email']}
+                    st.query_params["logged_user"] = user['username']
                     st.success("Login Success!")
                     st.rerun()
                 else:
@@ -439,7 +428,7 @@ if not st.session_state.get("is_logged_in", False):
                 submit_reg = st.form_submit_button("Sign Up", type="primary", use_container_width=True)
             if submit_reg:
                 if reg_user and reg_pass and reg_email:
-                    success, msg = register_user(reg_user.strip(), reg_pass.strip(), reg_email.strip())
+                    success, msg = register_user(reg_user, reg_pass, reg_email)
                     (st.success if success else st.error)(msg)
                 else:
                     st.error("Sabhi fields bharein!")
@@ -507,6 +496,8 @@ with st.sidebar:
     if st.button("🚪 Logout Account", use_container_width=True):
         st.session_state.is_logged_in = False
         st.session_state.user_data = None
+        if "logged_user" in st.query_params:
+            del st.query_params["logged_user"]
         st.rerun()
 
 if st.session_state.get("rzp_result"):
@@ -516,7 +507,7 @@ if st.session_state.get("rzp_result"):
         st.code(f"Your Passcode Key: {pk}")
     st.session_state.rzp_result = None
 
-# --- TOP NAVIGATION MENU BAR (WITH DIRECT ADMIN PANEL) ---
+# --- TOP NAVIGATION MENU BAR (WITH SECURE ADMIN PANEL) ---
 h_col1, h_col2, h_col3 = st.columns([1, 4, 1])
 with h_col1:
     with st.popover("☰ Menu"):
@@ -528,8 +519,9 @@ with h_col1:
         if st.button("👨‍💻 Developer Profile", key="pop_dev", use_container_width=True):
             st.session_state.active_page = "developer"; st.rerun()
 
-        # ADMIN KEY GENERATOR DIRECTLY VISIBLE IN MENU
-        if username.lower() in ["admin", "@admin"]:
+        # ADMIN KEY GENERATOR (SECURELY FETCHED VIA SECRETS INCLUDING 'muskan')
+        allowed_admins = [u.strip().lower() for u in get_env_or_secret("ADMIN_USERS", "admin,gaurav,gg,muskan").split(",")]
+        if username.lower() in allowed_admins:
             st.divider()
             st.markdown("### 🔑 Admin Key Generator")
             if st.button("Generate New Pro Key", type="primary", key="pop_gen_key", use_container_width=True):
@@ -537,8 +529,8 @@ with h_col1:
                 st.success("New Key Generated!")
                 st.code(gen_key)
 
-    # ==============================================================================
-# TOP NAVIGATION & HEADER DISPLAY (SINGLE MENU FIX)
+# ==============================================================================
+# TOP NAVIGATION & HEADER DISPLAY
 # ==============================================================================
 h_col1, h_col2 = st.columns([4, 1])
 
@@ -573,8 +565,6 @@ with h_col2:
             st.rerun()
 
 st.divider()
-
-
 
 # =========================================================
 # PAGE 1: CHAT INTERFACE & PROBLEM SOLVER
